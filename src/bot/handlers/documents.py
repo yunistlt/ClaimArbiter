@@ -27,58 +27,83 @@ logger = logging.getLogger(__name__)
 
 async def chat_with_llm(message: types.Message):
     """
-    General chat capabilities for the bot.
-    Now uses chat history context!
+    General chat capabilities with INTELLIGENT ROUTING.
+    The LLM decides whether to just talk or to trigger the document pipeline.
     """
     llm = get_llm("gpt-4o")
     
-    # Get history - Increased to 50 messages for better context
+    # 1. Define Tools
+    from langchain_core.tools import tool
+
+    @tool
+    async def start_analysis_pipeline(justification: str):
+        """
+        Call this tool ONLY when the user asks to generate a document, create a PDF, 
+        write an official response, formulate an opinion, or analyze the case formally.
+        This triggers the Secretary -> Engineer -> Lawyer -> Clerk workflow.
+        """
+        # This will be handled in the execution block
+        return "PIPELINE_TRIGGERED"
+
+    tools = [start_analysis_pipeline]
+    llm_with_tools = llm.bind_tools(tools)
+    
+    # 2. Get history
     card = IncidentManager.get_or_create_incident(message.chat.id)
     chat_history = card.chat_history[-50:]
     history_entries = []
     
     for msg in chat_history:
         role_label = "System/Bot" if msg.role == "bot" else "User"
-        # If username is set and different from generic User label, use it
         user_label = msg.username if msg.username else role_label
         timestamp = msg.timestamp.strftime('%H:%M')
-        # Check if content already suggests it's a forward, if not, relying on role/username
-        history_entries.append(f"[{timestamp}] {user_label}: {msg.content}")
+        intro = f"[{timestamp}] {user_label}: "
+        content = msg.content
+        history_entries.append(f"{intro}{content}")
     
     chat_context = "\n".join(history_entries)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "Ты — Telegram-бот «ЗМК-Юрист», координатор цифрового юридического отдела ООО «ЗМК». "
-                   "Твоя задача — быть лицом отдела и общаться с сотрудниками. "
-                   "Ты вежлив, компетентен и готов помочь. Твои ответы должны быть логичны и опираться на контекст.\n"
-                   "Твоя команда (виртуальные агенты):\n"
-                   "1. Анна (Секретарь) — педантичная, следит за наличием документов (ТОРГ-12, акты), первой принимает файлы.\n"
-                   "2. Борис Петрович (Инженер) — опытный специалист, оценивает техническую сторону брака, сверяет с ГОСТами. Строг, но справедлив.\n"
-                   "3. Елена Владимировна (Юрист) — защищает интересы компании, ищет пункты договора про просрочки и нарушения приемки.\n"
-                   "4. Дмитрий (Клерк) — составляет официальные письма и претензии канцелярским языком.\n\n"
-                   "ВАЖНО ПРО КОНТЕКСТ:\n"
-                   "1. Тебе передается история чата. Читай её внимательно.\n"
-                   "2. Сообщения, помеченные как [Forwarded from ...], — это пересланные сообщения (например, от клиента или другого сотрудника). Анализируй их как входные данные/факты, а не как прямую речь текущего пользователя.\n"
-                   "3. Если пользователь переслал переписку и спрашивает «Проанализируй» или «Что думаешь?», используй пересланные сообщения как материал для анализа.\n"
-                   "4. Твой ответ должен быть кратким, по делу. Если видишь проблему/брак — предлагай прислать фото/документы (если их еще нет).\n"
-                   "5. Если тебя спрашивают, кто в твоей команде или как ты работаешь — подробно расскажи про Анну, Бориса, Елену и Дмитрия.\n"
-                   "6. Если тебя спрашивают, можно ли добавить в чат — отвечай утвердительно.\n"
-                   "7. Ты умеешь не только разбирать рекламации, но и помогать с **любыми деловыми письмами**. Если тебя просят составить ответ клиенту, письмо-уведомление или другое официальное сообщение — Дмитрий (Клерк) с радостью поможет сформулировать текст в деловом стиле."),
-        ("user", "История чата (последние 50 сообщений):\n{context}\n\nТекущий запрос: {text}")
+        ("system", "Ты — Telegram-бот «ЗМК-Юрист», менеджер юридического отдела. Твоя задача — управлять процессом разбора рекламаций.\n\n"
+                   "У тебя есть доступ к инструменту `start_analysis_pipeline`, который запускает команду агентов (Инженер, Юрист, Документовед).\n"
+                   "Твоя стратегия:\n"
+                   "1. Если пользователь просто задает вопрос — отвечай как консультант.\n"
+                   "2. Если пользователь просит 'Сформировать мнение', 'Дать ответ', 'Сделать документ', 'Проанализировать', 'Прислать скрин/пдф' — ОБЯЗАТЕЛЬНО вызывай `start_analysis_pipeline`.\n"
+                   "3. Не говори 'Я сейчас передам дело', если ты не вызываешь инструмент. Если вызываешь — просто вызови его, не пиши лишнего текста.\n"
+                   "4. Твоя команда: Анна (Секретарь), Борис (Инженер), Елена (Юрист), Дмитрий (Клерк)."),
+        ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
     
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | llm_with_tools
     
     try:
-        response = await chain.ainvoke({"text": message.text, "context": chat_context})
+        # 3. Get LLM Decision
+        ai_msg = await chain.ainvoke({"text": message.text, "context": chat_context})
         
-        # Record bot's answer too
-        IncidentManager.add_message(message.chat.id, "bot", response, "ZMK_Bot")
+        # 4. Check for Tool Calls
+        if ai_msg.tool_calls:
+            # The LLM decided to work!
+            tool_call = ai_msg.tool_calls[0]
+            if tool_call["name"] == "start_analysis_pipeline":
+                # User wants action -> Trigger Pipeline
+                 await message.answer("🔄 Вас понял. Запускаю процедуру формирования ответа и ПДФ...")
+                 await run_analysis_pipeline(message, card)
+                 # Bot record
+                 IncidentManager.add_message(message.chat.id, "bot", "Started analysis pipeline (Tool Call)", "ZMK_Bot")
+                 return
         
-        await message.answer(response)
+        # 5. Normal Response (Just talk)
+        response_text = ai_msg.content
+        if not response_text:
+             # Fallback if LLM tried to call tool but failed or sent empty content
+             response_text = "Принято."
+             
+        IncidentManager.add_message(message.chat.id, "bot", response_text, "ZMK_Bot")
+        await message.answer(response_text)
+        
     except Exception as e:
         logger.error(f"Chat LLM Error: {e}")
-        await message.answer("Извините, я задумался и не смог сформулировать ответ.")
+        await message.answer("Извините, произошла ошибка в модуле управления.")
 
 async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
     """
@@ -257,7 +282,7 @@ async def handle_text_message(message: types.Message):
     elif is_reply:
         should_reply = True
     
-    # ПРИНУДИТЕЛЬНЫЙ ЗАПУСК PDF: Если просят ПДФ, запускаем пайплайн вручную!!!
+    # ПРИНУДИТЕЛЬНЫЙ ЗАПУСК PDF (На всякий случай оставим, но LLM теперь умнее)
     if ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
          # Получаем текущее состояние
          card = IncidentManager.get_or_create_incident(message.chat.id)
@@ -265,11 +290,7 @@ async def handle_text_message(message: types.Message):
          await run_analysis_pipeline(message, card)
          return # Завершаем, чтобы не дублировалось через LLM
 
-    if is_relevant and not is_forwarded:
-         # Only reply to relevant keywords in groups IF IT IS NOT A FORWARD
-         # Forwards are treated as data ingestion. User must ask explicitly to analyze.
-         should_reply = True
-         
+    # В личке или при ответе - всегда слушаем LLM
     if should_reply:
         # В личке или при явном обращении бот "умный" и общительный через LLM
         await chat_with_llm(message)
