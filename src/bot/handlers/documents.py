@@ -241,7 +241,8 @@ async def handle_text_message(message: types.Message):
     text = message.text.lower()
     keywords = [
         "претензия", "брак", "дефект", "сломалось", "не работает", "возврат", "рекламац", "ошибка", "проблема",
-        "анализ", "провер", "статус", "ситуаци", "помощь", "бот", "@zmkclaim_bot"
+        "анализ", "провер", "статус", "ситуаци", "помощь", "бот", "@zmkclaim_bot",
+        "пдф", "сформируй", "ответ", "письмо", "проект", "составь", "сделай"
     ]
     
     is_private = message.chat.type == "private"
@@ -255,7 +256,16 @@ async def handle_text_message(message: types.Message):
         should_reply = True
     elif is_reply:
         should_reply = True
-    elif is_relevant and not is_forwarded:
+    
+    # ПРИНУДИТЕЛЬНЫЙ ЗАПУСК PDF: Если просят ПДФ, запускаем пайплайн вручную!!!
+    if ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
+         # Получаем текущее состояние
+         card = IncidentManager.get_or_create_incident(message.chat.id)
+         await message.answer("🔄 Принято. Начинаю формирование документа...")
+         await run_analysis_pipeline(message, card)
+         return # Завершаем, чтобы не дублировалось через LLM
+
+    if is_relevant and not is_forwarded:
          # Only reply to relevant keywords in groups IF IT IS NOT A FORWARD
          # Forwards are treated as data ingestion. User must ask explicitly to analyze.
          should_reply = True
