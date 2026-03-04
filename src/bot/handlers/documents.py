@@ -283,9 +283,17 @@ async def handle_text_message(message: types.Message):
     # Logic for replying
     should_reply = False
     
+    # Check if explicitly addressed (keywords, bot name, or reply)
+    # Adding specific triggers for the persona
+    triggers = ["виктор", "сергеевич", "бот", "bot", "змк", "юрист", "@"]
+    is_addressed = any(t in text for t in triggers)
+
     if is_private:
         should_reply = True
     elif is_reply:
+        should_reply = True
+    elif is_addressed or is_relevant:
+        # If mentioned by name OR discussing work topics (keywords) in the group
         should_reply = True
     
     # ПРИНУДИТЕЛЬНЫЙ ЗАПУСК PDF (На всякий случай оставим, но LLM теперь умнее)
@@ -303,4 +311,4 @@ async def handle_text_message(message: types.Message):
     else:
         # В остальных случаях (включая пересланные сообщения в группах) — молчим и записываем
         # Можно добавить лог, чтобы видеть, что сообщение обработано
-        logger.info(f"Recorded message from {message.from_user.id} in group (Forwarded={is_forwarded})")
+        logger.info(f"Recorded message from {message.from_user.id} in group (Forwarded={is_forwarded}). Silent mode.")
