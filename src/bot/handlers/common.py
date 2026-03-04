@@ -7,9 +7,13 @@ router = Router()
 @router.message(CommandStart(), ~IsAllowedUser())
 async def command_start_unauthorized(message: types.Message) -> None:
     """
-    Handler for unauthorized users.
+    Handler for unauthorized users in PM.
     """
-    await message.answer(f"⛔️ Доступ запрещен.\nВаш Telegram ID: <code>{message.from_user.id}</code>\nСообщите его администратору для добавления в список разрешенных пользователей.")
+    if message.chat.type == "private":
+        await message.answer(f"⛔️ Бот работает только в рабочих чатах.\nВаш ID: <code>{message.from_user.id}</code>")
+    else:
+        # В группах бот доступен всем, сюда не попадем
+        pass
 
 @router.message(CommandStart(), IsAllowedUser())
 async def command_start_handler(message: types.Message) -> None:
