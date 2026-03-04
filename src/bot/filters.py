@@ -2,28 +2,34 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message
 import logging
 from config import ALLOWED_USER_IDS
+from services.access_control import AccessControl
 
 class IsAllowedUser(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         """
-        Правила доступа:
-        1. Если сообщение из ГРУППЫ или СУПЕРГРУППЫ -> Разрешено всем (полагаемся на то, что бот только в рабочих чатах).
-        2. Если сообщение в ЛИЧКУ -> Разрешено только если пользователь в ALLOWED_USER_IDS (администраторы).
-        3. Если ALLOWED_USER_IDS не задан -> В группе работает, в личке предупреждает.
+        Правила доступа (Динамические):
+        1. Если сообщение из ГРУППЫ -> Бот сохраняет ID участника в локальный список (авторизует).
+        2. Если сообщение в ЛИЧКУ -> Бот проверяет локальный список.
+           Если пользователя нет в списке (он ни разу не писал в группе), доступ закрыт.
         """
-        # 1. Разрешаем доступ всем в групповых чатах
+        user_id = message.from_user.id
+        access_control = AccessControl()
+        
+        # 1. Поведение в групповых чатах: Автоматическая авторизация
         if message.chat.type in ["group", "supergroup"]:
+            # Если пользователь пишет в рабочий чат, значит он сотрудник. Добавляем его.
+            access_control.add_user(user_id)
             return True
-            
-        # 2. В личных сообщениях проверяем белый список (если он есть)
-        if ALLOWED_USER_IDS:
-             return message.from_user.id in ALLOWED_USER_IDS
+        
+        # 2. Поведение в личке: Проверка
+        # Сначала проверяем жестко заданных админов из конфига (на всякий случай)
+        if ALLOWED_USER_IDS and user_id in ALLOWED_USER_IDS:
+             return True
              
-        # Если список админов пуст и пишут в личку — лучше разрешить (режим отладки) или запретить?
-        # Чтобы не блокировать совсем без настройки, разрешим, но с варнингом в логах.
-        # Но по вашей просьбе "закрытый бот" — по умолчанию чужим в ЛС лучше не отвечать, 
-        # однако без админа бот станет "неуправляемым" в ЛС. 
-        # Допустим: если список пуст, доступ в ЛС открыт (поведение по умолчанию). 
-        # Если список задан - ЛС закрыто.
-        logging.warning("No ALLOWED_USER_IDS set! PM access is open.")
-        return True
+        # Затем проверяем тех, кто был замечен в группах
+        if access_control.is_allowed(user_id):
+            return True
+
+        # Если нигде не нашли
+        logging.warning(f"Unauthorized PM access attempt: {user_id}")
+        return False

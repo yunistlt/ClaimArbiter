@@ -9,11 +9,11 @@ async def command_start_unauthorized(message: types.Message) -> None:
     """
     Handler for unauthorized users in PM.
     """
-    if message.chat.type == "private":
-        await message.answer(f"⛔️ Бот работает только в рабочих чатах.\nВаш ID: <code>{message.from_user.id}</code>")
-    else:
-        # В группах бот доступен всем, сюда не попадем
-        pass
+    await message.answer(
+        f"⛔️ Я пока не знаком с вами.\n"
+        f"Чтобы я начал работать в личных сообщениях, пожалуйста, <b>напишите любое сообщение в любой рабочий чат</b>, где я добавлен.\n"
+        f"Ваш Telegram ID: <code>{message.from_user.id}</code>"
+    )
 
 @router.message(CommandStart(), IsAllowedUser())
 async def command_start_handler(message: types.Message) -> None:
