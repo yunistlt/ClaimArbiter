@@ -256,14 +256,15 @@ async def handle_document_upload(message: types.Message):
     response_text = (f"📎 Документ <b>{file_name}</b> принят.\n")
     
     if missing:
-        response_text += (f"⚠️ Не хватает: {', '.join(missing)}\nНо я всё равно попробую проанализировать данные.")
+        response_text += (f"⚠️ Для полноценного анализа не хватает: {', '.join(missing)}\n")
+        response_text += "Вы можете загрузить остальные документы или написать <b>«Анализ»</b>, чтобы работать с тем, что есть."
         await message.answer(response_text)
-        # Allow processing even if incomplete
-        await run_delegated_task(message, updated_card)
     else:
-        await message.answer(response_text + "\n✅ Все документы собраны!")
-        # Automatically trigger pipeline if documents are complete (assuming claim by default for uploads)
-        await run_delegated_task(message, updated_card)
+        await message.answer(response_text + "\n✅ Все документы собраны! Напишите <b>«Анализ»</b> для старта работы.")
+    
+    # SAFETY: Do NOT trigger run_delegated_task automatically on file upload. 
+    # It causes budget drain if user uploads multiple files in a row (n files * 3 agents = $$$).
+    # Wait for explicit user confirmation via text message.
 
 @router.message(F.text & ~F.text.startswith('/'), IsAllowedUser())
 async def handle_text_message(message: types.Message):
