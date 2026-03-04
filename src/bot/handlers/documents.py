@@ -10,9 +10,7 @@ from models import IncidentCard, DocumentInfo
 from services.incident_manager import IncidentManager
 from services.pdf_service import create_pdf
 from aiogram.types import FSInputFile
-import os
-import tempfile
-import logging
+from bot.filters import IsAllowedUser
 
 router = Router()
 secretary = SecretaryAgent()
@@ -20,6 +18,7 @@ engineer = EngineerAgent()
 lawyer = LawyerAgent()
 clerk = ClerkAgent()
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def chat_with_llm(message: types.Message):
@@ -129,7 +128,7 @@ async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
             logger.error(f"Error generating PDF: {e}")
             await message.answer("⚠️ Произошла ошибка при генерации PDF.")
     
-@router.message(F.document | F.photo)
+@router.message(F.document | F.photo, IsAllowedUser())
 async def handle_document_upload(message: types.Message):
     """
     Handles file upload by sending it to Secretary Agent.
@@ -188,7 +187,7 @@ async def handle_document_upload(message: types.Message):
         # Trigger pipeline
         await run_analysis_pipeline(message, updated_card)
 
-@router.message(F.text & ~F.text.startswith('/'))
+@router.message(F.text & ~F.text.startswith('/'), IsAllowedUser())
 async def handle_text_message(message: types.Message):
     """
     Handle plain text messages.
