@@ -25,58 +25,69 @@ clerk = ClerkAgent()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from langchain_core.tools import tool
+
+# Define tool at module level to avoid redefinition/pickling issues
+@tool
+def delegate_task(task_type: str, description: str):
+    """
+    Call this tool when the user asks for a specific legal service that requires formal processing.
+    
+    Args:
+        task_type (str): The type of task. Must be one of:
+            - 'claim_processing': For product defects, returns, warranties (involves Engineer).
+            - 'document_drafting': For creating contracts, claims, letters, agreements, lawsuits (no Engineer needed).
+            - 'legal_advice': For complex legal questions requiring formal analysis or due diligence.
+        description (str): A summary of what needs to be done.
+    """
+    return "TASK_DELEGATED"
+
 async def chat_with_llm(message: types.Message):
     """
     General chat capabilities with INTELLIGENT ROUTING.
-    The LLM decides whether to just talk or to trigger the document pipeline.
+    The LLM decides whether to just talk or to trigger a specific legal workflow.
     """
     llm = get_llm("gpt-4o")
     
-    # 1. Define Tools
-    from langchain_core.tools import tool
-
-    @tool
-    async def start_analysis_pipeline(justification: str):
-        """
-        Call this tool ONLY when the user asks to generate a document, create a PDF, 
-        write an official response, formulate an opinion, or analyze the case formally.
-        This triggers the Secretary -> Engineer -> Lawyer -> Clerk workflow.
-        """
-        # This will be handled in the execution block
-        return "PIPELINE_TRIGGERED"
-
-    tools = [start_analysis_pipeline]
+    # 1. Bind Tools
+    tools = [delegate_task]
     llm_with_tools = llm.bind_tools(tools)
     
     # 2. Get history
     card = IncidentManager.get_or_create_incident(message.chat.id)
-    chat_history = card.chat_history[-50:]
+    chat_history = card.chat_history[-20:] # Reduced from 50 to avoid token limits with large docs
     history_entries = []
     
     for msg in chat_history:
         role_label = "System/Bot" if msg.role == "bot" else "User"
         user_label = msg.username if msg.username else role_label
+        # Clean content to avoid massive tokens
+        content = msg.content[:1000] if msg.content else ""
+        if len(msg.content) > 1000: content += "...(truncated)"
+        
         timestamp = msg.timestamp.strftime('%H:%M')
         intro = f"[{timestamp}] {user_label}: "
-        content = msg.content
         history_entries.append(f"{intro}{content}")
     
     chat_context = "\n".join(history_entries)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "Ты — Виктор Сергеевич (Viktor), руководитель цифрового юридического отдела ООО «ЗМК» (Telegram-бот «ЗМК-Юрист»). "
-                   "Твоя задача — координировать работу команды и принимать решения.\n\n"
-                   "Твой стиль общения: Деловой, уверенный, конструктивный. Ты — 'лицо' отдела.\n\n" 
-                   "У тебя есть доступ к инструменту `start_analysis_pipeline`. Это 'волшебная кнопка', которая запускает твоих сотрудников в работу.\n"
-                   "Твоя стратегия:\n"
-                   "1. Если пользователь просто задает вопрос или болтает — отвечай сам, опираясь на контекст переписки.\n"
-                   "2. Если пользователь просит ДЕЙСТВИЙ ('Сформировать мнение', 'Дать ответ', 'Сделать документ', 'Проанализировать', 'Прислать скрин/пдф') — ОБЯЗАТЕЛЬНО вызывай `start_analysis_pipeline`.\n"
-                   "3. Не говори 'Я сейчас передам дело', если ты не вызываешь инструмент. Если вызываешь — просто вызови его молча (система сама уведомит пользователя).\n"
-                   "4. Твоя команда (ты ей управляешь):\n"
-                   "   - Анна (Секретарь): сбор документов.\n"
-                   "   - Борис Петрович (Инженер): технический анализ.\n"
-                   "   - Елена Владимировна (Юрист): правовая оценка.\n"
-                   "   - Дмитрий (Клерк): оформление бумаг."),
+        ("system", "Ты — Виктор Сергеевич (Viktor), руководитель Юридического департамента ООО «ЗМК» (Telegram-бот «ЗМК-Юрист»). "
+                   "Твоя задача — профессионально управлять юридическими вопросами компании.\n\n"
+                   "Твой отдел теперь занимается ВСЕМ юридическим сопровождением, а не только рекламациями.\n"
+                   "Твой стиль: Деловой, компетентный, вежливый. Ты — опытный управленец.\n\n" 
+                   "Твои инструменты (команда):\n"
+                   "   - Анна (Секретарь): работа с файлами и OCR.\n"
+                   "   - Борис Петрович (Инженер): только ТЕХНИЧЕСКАЯ экспертиза (дефекты, ГОСТ). Не привлекай его к договорам!\n"
+                   "   - Елена Владимировна (Юрист): общая правовая работа, договоры, суды, стратегия.\n"
+                   "   - Дмитрий (Клерк): оформление красивых официальных документов.\n\n"
+                   "СТРАТЕГИЯ:\n"
+                   "1. Если вопрос простой или справочный — ответь сам.\n"
+                   "2. Если требуется ОФИЦИАЛЬНЫЙ ДОКУМЕНТ или СЛОЖНЫЙ АНАЛИЗ — используй `delegate_task`.\n"
+                   "3. Выбирай правильный `task_type`:\n"
+                   "   - `claim_processing`: если речь идет о БРАКЕ, ДЕФЕКТАХ, РЕКЛАМАЦИЯХ. (Нужен Борис Петрович).\n"
+                   "   - `document_drafting`: если просят составить ДОГОВОР, ПИСЬМО (не по браку), ИСК. (Инженер НЕ нужен).\n"
+                   "   - `legal_advice`: если нужен развернутый юридический совет.\n"),
         ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
     
@@ -84,70 +95,99 @@ async def chat_with_llm(message: types.Message):
     
     try:
         # 3. Get LLM Decision
+        # Use ainvoke with robust error handling
         ai_msg = await chain.ainvoke({"text": message.text, "context": chat_context})
         
         # 4. Check for Tool Calls
         if ai_msg.tool_calls:
             # The LLM decided to work!
             tool_call = ai_msg.tool_calls[0]
-            if tool_call["name"] == "start_analysis_pipeline":
-                # User wants action -> Trigger Pipeline
-                 await message.answer("🔄 Вас понял. Запускаю процедуру формирования ответа и ПДФ...")
-                 await run_analysis_pipeline(message, card)
-                 # Bot record
-                 IncidentManager.add_message(message.chat.id, "bot", "Started analysis pipeline (Tool Call)", "ZMK_Bot")
-                 return
+            if tool_call["name"] == "delegate_task":
+                args = tool_call["args"]
+                t_type = args.get("task_type", "claim_processing")
+                desc = args.get("description", "No description")
+                
+                await message.answer(f"🔄 Вас понял. Поручаю задачу отделу: {t_type}...")
+                
+                # Update card context
+                card.task_type = t_type
+                card.task_description = desc
+                IncidentManager.update_incident(message.chat.id, card)
+                
+                await run_delegated_task(message, card)
+                
+                # Bot record
+                IncidentManager.add_message(message.chat.id, "bot", f"Delegated task: {t_type}", "ZMK_Bot")
+                return
         
         # 5. Normal Response (Just talk)
         response_text = ai_msg.content
         if not response_text:
              # Fallback if LLM tried to call tool but failed or sent empty content
-             response_text = "Принято."
+             response_text = "Принято. Работаем."
              
         IncidentManager.add_message(message.chat.id, "bot", response_text, "ZMK_Bot")
         await message.answer(response_text)
         
     except Exception as e:
-        logger.error(f"Chat LLM Error: {e}")
-        await message.answer("Извините, произошла ошибка в модуле управления.")
+        logger.error(f"Chat LLM Error: {e}", exc_info=True)
+        # Show specific error to user for debugging (temporary)
+        await message.answer(f"⚠️ Ошибка в модуле решений (LLM): {str(e)}")
 
-async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
+async def run_delegated_task(message: types.Message, card: IncidentCard):
     """
-    Orchestrates the analysis pipeline once documents are ready.
+    Orchestrates the workflow based on task type.
     """
-    status_msg = await message.answer("🔄 Документы собраны. Передаю дело специалистам...")
+    status_msg = await message.answer(f"📂 Начинаю работу по задаче: {card.task_type}...")
     
-    # 1. Technical Analysis
-    await status_msg.edit_text("⚙️ <b>Борис Петрович (Инженер)</b> изучает фото дефектов...")
-    card = await engineer.run(card)
-    
-    # 2. Legal Analysis
-    await status_msg.edit_text("⚖️ <b>Елена Владимировна (Юрист)</b> строит правовую позицию...")
-    card = await lawyer.run(card)
-    
-    # 3. Document Drafting
-    await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> готовит официальный ответ...")
-    card = await clerk.run(card)
-    
+    # --- Workflow 1: Claim Processing (Standard Pipeline) ---
+    if card.task_type == "claim_processing":
+        # 1. Technical Analysis
+        await status_msg.edit_text("⚙️ <b>Борис Петрович (Инженер)</b> анализирует дефекты...")
+        card = await engineer.run(card)
+        
+        # 2. Legal Analysis
+        await status_msg.edit_text("⚖️ <b>Елена Владимировна (Юрист)</b> оценивает риски...")
+        card = await lawyer.run(card)
+        
+        # 3. Drafting
+        await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> готовит ответ...")
+        card = await clerk.run(card)
+
+    # --- Workflow 2: General Document Drafting / Legal Advice ---
+    elif card.task_type in ["document_drafting", "legal_advice"]:
+        # Skip Engineer!
+        # 1. Legal Analysis / Strategy
+        await status_msg.edit_text("⚖️ <b>Елена Владимировна (Юрист)</b> прорабатывает правовую позицию...")
+        # Lawyer needs to know what to do based on task_description, not technical_verdict
+        # We might need to update LawyerAgent to handle this, or mocking it here.
+        # Ideally, LawyerAgent should see the `task_description`.
+        card = await lawyer.run(card)
+        
+        # 2. Drafting (if needed)
+        if card.task_type == "document_drafting" or card.generated_response is None:
+             await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> составляет документ...")
+             card = await clerk.run(card)
+
     # Final Result
     await status_msg.delete()
     
     # Display text preview
     result_text = (
-        f"✅ <b>Готов проект ответа:</b>\n\n"
+        f"✅ <b>Готово:</b>\n\n"
         f"<code>{card.generated_response}</code>\n\n"
-        f"Генерирую PDF..."
+        f"Формирую файл..."
     )
     await message.answer(result_text)
 
     # --- Generate and Send PDF ---
     if card.generated_response:
-        pdf_filename = f"ZMK_Response_{card.chat_id}_{message.message_id}.pdf"
+        pdf_filename = f"ZMK_Doc_{card.chat_id}_{message.message_id}.pdf"
         temp_dir = tempfile.gettempdir()
         full_pdf_path = os.path.join(temp_dir, pdf_filename)
         
         try:
-            # Run PDF generation in a thread to avoid blocking the event loop
+            # Run PDF generation in a thread
             loop = asyncio.get_running_loop()
             success = await loop.run_in_executor(None, create_pdf, card.generated_response, full_pdf_path)
             
@@ -155,9 +195,8 @@ async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
                 file_to_send = FSInputFile(full_pdf_path)
                 await message.answer_document(
                     document=file_to_send, 
-                    caption="📄 <b>Официальный ответ (PDF)</b>\nСформирован автоматически."
+                    caption="📄 <b>Документ (PDF)</b>\nПодготовлен юридическим департаментом."
                 )
-                # Cleanup after sending
                 os.remove(full_pdf_path)
             else:
                 await message.answer("⚠️ Ошибка: Не удалось создать PDF файл.")
@@ -221,8 +260,8 @@ async def handle_document_upload(message: types.Message):
         await message.answer(response_text)
     else:
         await message.answer(response_text + "\n✅ Все документы собраны!")
-        # Trigger pipeline
-        await run_analysis_pipeline(message, updated_card)
+        # Automatically trigger pipeline if documents are complete (assuming claim by default for uploads)
+        await run_delegated_task(message, updated_card)
 
 @router.message(F.text & ~F.text.startswith('/'), IsAllowedUser())
 async def handle_text_message(message: types.Message):
@@ -273,7 +312,7 @@ async def handle_text_message(message: types.Message):
     keywords = [
         "претензия", "брак", "дефект", "сломалось", "не работает", "возврат", "рекламац", "ошибка", "проблема",
         "анализ", "провер", "статус", "ситуаци", "помощь", "бот", "@zmkclaim_bot",
-        "пдф", "сформируй", "ответ", "письмо", "проект", "составь", "сделай"
+        "пдф", "сформируй", "ответ", "письмо", "проект", "составь", "сделай", "договор", "иск", "юрист", "консультац"
     ]
     
     is_private = message.chat.type == "private"
@@ -284,7 +323,6 @@ async def handle_text_message(message: types.Message):
     should_reply = False
     
     # Check if explicitly addressed (keywords, bot name, or reply)
-    # Adding specific triggers for the persona
     triggers = ["виктор", "сергеевич", "бот", "bot", "змк", "юрист", "@"]
     is_addressed = any(t in text for t in triggers)
 
@@ -293,22 +331,30 @@ async def handle_text_message(message: types.Message):
     elif is_reply:
         should_reply = True
     elif is_addressed or is_relevant:
-        # If mentioned by name OR discussing work topics (keywords) in the group
         should_reply = True
     
-    # ПРИНУДИТЕЛЬНЫЙ ЗАПУСК PDF (На всякий случай оставим, но LLM теперь умнее)
+    # Direct PDF generation trigger (legacy override)
     if ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
          # Получаем текущее состояние
          card = IncidentManager.get_or_create_incident(message.chat.id)
+         
+         # Guess task type if not set
+         if not card.task_type or card.task_type == "claim": # default "claim" might be old value
+              # If user asks for general letter, maybe switch to document_drafting?
+              # For safety, let the LLM handle it via chat_with_llm if possible, OR default to claim.
+              # Let's default to claim_processing for backward compatibility unless LLM intervenes.
+              if "договор" in text or "иск" in text:
+                  card.task_type = "document_drafting"
+                  card.task_description = text
+              else:
+                  card.task_type = "claim_processing"
+                  
          await message.answer("🔄 Принято. Начинаю формирование документа...")
-         await run_analysis_pipeline(message, card)
-         return # Завершаем, чтобы не дублировалось через LLM
+         await run_delegated_task(message, card)
+         return 
 
     # В личке или при ответе - всегда слушаем LLM
     if should_reply:
-        # В личке или при явном обращении бот "умный" и общительный через LLM
         await chat_with_llm(message)
     else:
-        # В остальных случаях (включая пересланные сообщения в группах) — молчим и записываем
-        # Можно добавить лог, чтобы видеть, что сообщение обработано
         logger.info(f"Recorded message from {message.from_user.id} in group (Forwarded={is_forwarded}). Silent mode.")

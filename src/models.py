@@ -35,6 +35,8 @@ class IncidentCard(BaseModel):
     uploaded_documents: List[DocumentInfo] = Field(default_factory=list)
     
     # Analysis
+    task_type: str = "claim"  # 'claim', 'consultation', 'drafting'
+    task_description: Optional[str] = None # Description of the task for general legal work
     technical_verdict: Optional[str] = None
     legal_strategy: Optional[str] = None
     generated_response: Optional[str] = None
