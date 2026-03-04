@@ -11,6 +11,10 @@ from services.incident_manager import IncidentManager
 from services.pdf_service import create_pdf
 from aiogram.types import FSInputFile
 from bot.filters import IsAllowedUser
+import asyncio
+import os
+import tempfile
+import logging
 
 router = Router()
 secretary = SecretaryAgent()
@@ -112,7 +116,9 @@ async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
         full_pdf_path = os.path.join(temp_dir, pdf_filename)
         
         try:
-            success = create_pdf(card.generated_response, full_pdf_path)
+            # Run PDF generation in a thread to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, create_pdf, card.generated_response, full_pdf_path)
             
             if success and os.path.exists(full_pdf_path):
                 file_to_send = FSInputFile(full_pdf_path)
@@ -120,7 +126,7 @@ async def run_analysis_pipeline(message: types.Message, card: IncidentCard):
                     document=file_to_send, 
                     caption="📄 <b>Официальный ответ (PDF)</b>\nСформирован автоматически."
                 )
-                # Cleanup after sending (using asyncio sleep to ensure send completes? No, await blocks until send)
+                # Cleanup after sending
                 os.remove(full_pdf_path)
             else:
                 await message.answer("⚠️ Ошибка: Не удалось создать PDF файл.")

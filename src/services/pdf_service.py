@@ -23,7 +23,7 @@ def ensure_font():
     if not os.path.exists(FONT_PATH):
         logger.info(f"Downloading font from {FONT_URL}...")
         try:
-            response = requests.get(FONT_URL)
+            response = requests.get(FONT_URL, timeout=10) # Add timeout to prevent hanging
             response.raise_for_status()
             with open(FONT_PATH, "wb") as f:
                 f.write(response.content)
