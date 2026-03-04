@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # URL for a font that supports Cyrillic (Roboto)
-FONT_URL = "https://github.com/google/fonts/raw/main/ofl/roboto/Roboto-Regular.ttf"
+FONT_URL = "https://raw.githubusercontent.com/googlefonts/roboto-2/main/src/hinted/Roboto-Regular.ttf"
 FONT_PATH = "assets/fonts/Roboto-Regular.ttf"
 FONT_NAME = "Roboto"
 

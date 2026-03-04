@@ -141,7 +141,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
     status_msg = await message.answer(f"📂 Начинаю работу по задаче: {card.task_type}...")
     
     # --- Workflow 1: Claim Processing (Standard Pipeline) ---
-    if card.task_type == "claim_processing":
+    if card.task_type in ["claim_processing", "claim"]:
         # 1. Technical Analysis
         await status_msg.edit_text("⚙️ <b>Борис Петрович (Инженер)</b> анализирует дефекты...")
         card = await engineer.run(card)
@@ -155,7 +155,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         card = await clerk.run(card)
 
     # --- Workflow 2: General Document Drafting / Legal Advice ---
-    elif card.task_type in ["document_drafting", "legal_advice"]:
+    elif card.task_type in ["document_drafting", "legal_advice", "consultation"]:
         # Skip Engineer!
         # 1. Legal Analysis / Strategy
         await status_msg.edit_text("⚖️ <b>Елена Владимировна (Юрист)</b> прорабатывает правовую позицию...")
@@ -256,8 +256,10 @@ async def handle_document_upload(message: types.Message):
     response_text = (f"📎 Документ <b>{file_name}</b> принят.\n")
     
     if missing:
-        response_text += (f"⚠️ Не хватает: {', '.join(missing)}")
+        response_text += (f"⚠️ Не хватает: {', '.join(missing)}\nНо я всё равно попробую проанализировать данные.")
         await message.answer(response_text)
+        # Allow processing even if incomplete
+        await run_delegated_task(message, updated_card)
     else:
         await message.answer(response_text + "\n✅ Все документы собраны!")
         # Automatically trigger pipeline if documents are complete (assuming claim by default for uploads)
