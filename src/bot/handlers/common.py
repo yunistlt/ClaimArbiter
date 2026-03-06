@@ -34,7 +34,6 @@ async def on_user_joined(message: types.Message):
 
 @router.message(CommandStart(), ~IsAllowedUser())
 async def command_start_unauthorized(message: types.Message) -> None:
-async def command_start_unauthorized(message: types.Message) -> None:
     """
     Handler for unauthorized users in PM.
     """
@@ -43,24 +42,6 @@ async def command_start_unauthorized(message: types.Message) -> None:
         f"Чтобы я начал работать в личных сообщениях, пожалуйста, <b>напишите любое сообщение в любой рабочий чат</b>, где я добавлен.\n"
         f"Ваш Telegram ID: <code>{message.from_user.id}</code>"
     )
-
-@router.message(F.chat.type.in_({"group", "supergroup"}), F.text)
-async def process_any_group_message(message: types.Message):
-    """
-    Пассивный слушатель всех сообщений в группах.
-    Нужен, чтобы бот "увидел" чат и запомнил участников.
-    """
-    # Гарантированно запоминаем чат и автора сообщения
-    access_control.add_chat(message.chat.id)
-    if not message.from_user.is_bot:
-        access_control.add_user(message.from_user.id)
-    # Далее управление передается другим хендлерам (через продолжение?) 
-    # Нет, в aiogram 3.x Message Handler'ы терминальны по умолчанию, если не middleware. 
-    # Но так как этот хендлер стоит ВЫШЕ всех остальных текстовых в common, он может перехватить.
-    # Поэтому мы НЕ ставим его здесь как терминальный, или используем middleware.
-    # В данном случае, лучше встроить эту логику в IsAllowedUser фильтр, что уже сделано.
-    # Но если фильтр не сработал (например, для системных сообщений?), то эта страховка.
-    pass 
 
 @router.message(CommandStart(), IsAllowedUser())
 async def command_start_handler(message: types.Message) -> None:
