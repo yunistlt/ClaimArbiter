@@ -6,6 +6,14 @@ from services.access_control import AccessControl
 router = Router()
 access_control = AccessControl()
 
+
+def unauthorized_private_text(user_id: int) -> str:
+    return (
+        "⛔️ Я пока не знаком с вами.\n"
+        "Чтобы я начал работать в личных сообщениях, пожалуйста, <b>напишите любое сообщение в любой рабочий чат</b>, где я добавлен.\n"
+        f"Ваш Telegram ID: <code>{user_id}</code>"
+    )
+
 @router.message(F.content_type.in_({'new_chat_members', 'left_chat_member', 'group_chat_created', 'supergroup_chat_created'}))
 async def on_user_joined(message: types.Message):
     """
@@ -37,11 +45,15 @@ async def command_start_unauthorized(message: types.Message) -> None:
     """
     Handler for unauthorized users in PM.
     """
-    await message.answer(
-        f"⛔️ Я пока не знаком с вами.\n"
-        f"Чтобы я начал работать в личных сообщениях, пожалуйста, <b>напишите любое сообщение в любой рабочий чат</b>, где я добавлен.\n"
-        f"Ваш Telegram ID: <code>{message.from_user.id}</code>"
-    )
+    await message.answer(unauthorized_private_text(message.from_user.id))
+
+
+@router.message(F.chat.type == "private", ~IsAllowedUser())
+async def private_message_unauthorized(message: types.Message) -> None:
+    """
+    Prevent silent drops for unauthorized users in private chats.
+    """
+    await message.answer(unauthorized_private_text(message.from_user.id))
 
 @router.message(CommandStart(), IsAllowedUser())
 async def command_start_handler(message: types.Message) -> None:
@@ -67,4 +79,10 @@ async def command_help_handler(message: types.Message) -> None:
                          "/start - Начало работы\n"
                          "/status - Правовая оценка ситуации\n"
                          "/write - Генерация документа (в разработке)\n"
-                         "/files - Список документов (в разработке)")
+                         "/files - Список документов (в разработке)\n\n"
+                         "Команды юриста (в личном чате):\n"
+                         "/review_rules - Показать режимы согласования\n"
+                         "/review_set <task_type> <auto|manual> - Изменить режим\n"
+                         "/review_queue - Очередь на проверку\n"
+                         "/review_approve <id> - Согласовать и отправить\n"
+                         "/review_reject <id> <причина> - Отклонить")

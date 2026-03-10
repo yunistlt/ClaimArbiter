@@ -10,3 +10,4 @@ venv/
 .idea/
 .vscode/
 access_control.db
+review_queue.db
