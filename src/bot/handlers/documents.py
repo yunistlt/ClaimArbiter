@@ -318,26 +318,32 @@ async def handle_text_message(message: types.Message):
         "пдф", "сформируй", "ответ", "письмо", "проект", "составь", "сделай", "договор", "иск", "юрист", "консультац"
     ]
     
-    is_private = message.chat.type == "private"
-    is_relevant = any(k in text for k in keywords)
-    is_reply = message.reply_to_message and message.reply_to_message.from_user.is_bot
-    
     # Logic for replying
     should_reply = False
-    
-    # Check if explicitly addressed (keywords, bot name, or reply)
-    triggers = ["виктор", "сергеевич", "бот", "bot", "змк", "юрист", "@"]
-    is_addressed = any(t in text for t in triggers)
+    bot_user = await message.bot.get_me()
 
-    if is_private:
+    # 1. Private Chat -> Always reply
+    if message.chat.type == "private":
         should_reply = True
-    elif is_reply:
+    
+    # 2. Reply to Bot's message -> Always reply
+    elif message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot_user.id:
         should_reply = True
-    elif is_addressed or is_relevant:
-        should_reply = True
+            
+    # 3. Mentioned (Tagged) -> Always reply
+    elif message.entities:
+        for entity in message.entities:
+            if entity.type == "mention":
+                mention_text = message.text[entity.offset:entity.offset+entity.length]
+                if f"@{bot_user.username}".lower() == mention_text.lower():
+                    should_reply = True
+                    break
+            elif entity.type == "text_mention" and entity.user.id == bot_user.id:
+                should_reply = True
+                break
     
     # Direct PDF generation trigger (legacy override)
-    if ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
+    if should_reply and ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
          # Получаем текущее состояние
          card = IncidentManager.get_or_create_incident(message.chat.id)
          
