@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 class AccessControl:
     _instance = None
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    DB_PATH = os.getenv("ACCESS_CONTROL_DB_PATH", os.path.join(BASE_DIR, "access_control.db"))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    DB_PATH = os.getenv("ACCESS_CONTROL_DB_PATH", os.path.join(DATA_DIR, "access_control.db"))
     LEGACY_FILE_PATH = os.path.join(BASE_DIR, "allowed_users.json")
     
     def __new__(cls):
@@ -26,6 +27,7 @@ class AccessControl:
 
     def _init_db(self):
         """Create tables and migrate legacy JSON data when possible."""
+        os.makedirs(os.path.dirname(self.DB_PATH), exist_ok=True)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

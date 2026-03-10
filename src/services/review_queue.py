@@ -21,7 +21,8 @@ class ReviewQueue:
     _instance = None
 
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    DB_PATH = os.getenv("REVIEW_QUEUE_DB_PATH", os.path.join(BASE_DIR, "review_queue.db"))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    DB_PATH = os.getenv("REVIEW_QUEUE_DB_PATH", os.path.join(DATA_DIR, "review_queue.db"))
 
     def __new__(cls):
         if cls._instance is None:
@@ -33,6 +34,7 @@ class ReviewQueue:
         return sqlite3.connect(self.DB_PATH)
 
     def _init_db(self):
+        os.makedirs(os.path.dirname(self.DB_PATH), exist_ok=True)
         with self._conn() as conn:
             cur = conn.cursor()
             cur.execute(
