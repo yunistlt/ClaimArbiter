@@ -118,6 +118,31 @@ async def should_process_message_in_chat(message: types.Message) -> bool:
     entities = message.entities or message.caption_entities
     return is_bot_mentioned_in_entities(text_for_mentions, entities, bot_user.username, bot_user.id)
 
+
+def is_forwarded_message(message: types.Message) -> bool:
+    """Return True when message was forwarded (aiogram 3.x and legacy fields)."""
+    if getattr(message, "forward_origin", None):
+        return True
+    return bool(getattr(message, "forward_from", None) or getattr(message, "forward_sender_name", None))
+
+
+def should_process_document_upload(message: types.Message, default_should_process: bool) -> bool:
+    """
+    For usability, forwarded documents in groups should be processed even without
+    direct mention/reply to the bot.
+    """
+    if message.chat.type == "private":
+        return True
+
+    if default_should_process:
+        return True
+
+    # Core UX requirement: users often forward files from PM/channel.
+    if message.chat.type in ["group", "supergroup"] and is_forwarded_message(message):
+        return True
+
+    return False
+
 async def chat_with_llm(message: types.Message):
     """
     General chat capabilities with INTELLIGENT ROUTING.
@@ -451,7 +476,8 @@ async def handle_document_upload(message: types.Message):
     """
     chat_id = message.chat.id
 
-    if not await should_process_message_in_chat(message):
+    default_should_process = await should_process_message_in_chat(message)
+    if not should_process_document_upload(message, default_should_process):
         logger.info(f"Ignored document from {message.from_user.id} in group without mention/reply.")
         return
     
