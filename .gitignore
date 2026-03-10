@@ -11,3 +11,5 @@ venv/
 .vscode/
 access_control.db
 review_queue.db
+data/
+docker-compose.override.yml

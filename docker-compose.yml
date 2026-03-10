@@ -1,0 +1,16 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Базы данных хранятся в /app/data — этот каталог подключён как volume
+      # и не стирается при пересборке/рестарте контейнера
+      ACCESS_CONTROL_DB_PATH: /app/data/access_control.db
+      REVIEW_QUEUE_DB_PATH: /app/data/review_queue.db
+    volumes:
+      - bot_data:/app/data
+
+volumes:
+  bot_data:

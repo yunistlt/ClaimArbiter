@@ -26,5 +26,8 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Копируем весь проект в контейнер
 COPY . .
 
+# Создаём каталог для постоянных данных (БД пользователей и очереди согласования)
+RUN mkdir -p /app/data
+
 # Команда запуска бота
 CMD ["python", "src/main.py"]
