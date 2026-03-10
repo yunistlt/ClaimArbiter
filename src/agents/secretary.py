@@ -28,6 +28,9 @@ class SecretaryAgent(BaseAgent):
         
         # Determine incident card for this chat
         card = IncidentManager.get_or_create_incident(chat_id)
+
+        # Try to infer task from current upload context to avoid irrelevant doc requests.
+        self._infer_task_context(card, doc_info, text)
         
         # 1. OCR / Content Extraction
         extracted_content = await self.extract_content(doc_info, text)
@@ -45,6 +48,32 @@ class SecretaryAgent(BaseAgent):
         IncidentManager.update_incident(chat_id, card)
         return card
 
+    def _infer_task_context(self, card: IncidentCard, doc_info: DocumentInfo, text: Optional[str]) -> None:
+        context = f"{doc_info.file_name or ''} {text or ''}".lower()
+
+        contract_markers = ["договор", "согласован", "agreement", "contract", "дс", "спецификац"]
+        claim_markers = ["претенз", "рекламац", "брак", "дефект", "торг-2", "torg-2", "торг-12", "torg-12"]
+
+        if any(marker in context for marker in contract_markers):
+            card.task_type = "document_drafting"
+            if not card.task_description:
+                card.task_description = text or f"Согласование договора: {doc_info.file_name}"
+        elif any(marker in context for marker in claim_markers) and card.task_type in ["claim", "claim_processing"]:
+            card.task_type = "claim_processing"
+
+        card.required_documents = self.get_required_documents(card)
+
+    def get_required_documents(self, card: IncidentCard) -> List[str]:
+        """
+        Returns context-aware list of required documents.
+        """
+        if card.task_type in ["document_drafting", "legal_advice", "consultation"]:
+            # For contract drafting/review don't ask for warehouse docs like TORG-12 by default.
+            return ["Contract"]
+
+        # Default flow for claims/defects.
+        return ["TORG-12", "Act-TORG-2", "Contract", "Photos"]
+
     async def extract_content(self, file_info: DocumentInfo, text_fallback: Optional[str] = None) -> str:
         """
         Placeholder for OCR / Vision extraction.
@@ -61,9 +90,10 @@ class SecretaryAgent(BaseAgent):
         """
         Returns missing required documents.
         """
+        required_docs = self.get_required_documents(card)
         uploaded_names = [d.file_name.upper() for d in card.uploaded_documents]
         missing = []
-        for req in card.required_documents:
+        for req in required_docs:
             # Simple substring check (heuristic) - replace with semantic check later
             found = any(req.upper() in name for name in uploaded_names)
             # Special check for 'Contract'

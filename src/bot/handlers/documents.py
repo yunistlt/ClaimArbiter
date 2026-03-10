@@ -181,7 +181,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
     await message.answer(result_text)
 
     # --- Generate and Send PDF ---
-    if card.generated_response:
+    if card.generated_response and not card.generated_response.startswith("Error"):
         pdf_filename = f"ZMK_Doc_{card.chat_id}_{message.message_id}.pdf"
         temp_dir = tempfile.gettempdir()
         full_pdf_path = os.path.join(temp_dir, pdf_filename)
@@ -203,6 +203,8 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         except Exception as e:
             logger.error(f"Error generating PDF: {e}")
             await message.answer("⚠️ Произошла ошибка при генерации PDF.")
+    elif card.generated_response:
+        await message.answer("⚠️ Документ не был сформирован полностью. Уточните задачу (тип документа и компанию-отправителя) и повторите запрос.")
     
 @router.message(F.document | F.photo, IsAllowedUser())
 async def handle_document_upload(message: types.Message):
@@ -249,6 +251,8 @@ async def handle_document_upload(message: types.Message):
     }
     
     updated_card: IncidentCard = await secretary.run(input_data)
+    updated_card.required_documents = secretary.get_required_documents(updated_card)
+    IncidentManager.update_incident(chat_id, updated_card)
     
     # 3. Check for completeness and notify user
     missing = secretary.check_completeness(updated_card)

@@ -31,7 +31,7 @@ class IncidentCard(BaseModel):
     buyer_name: Optional[str] = None
     
     # Documents
-    required_documents: List[str] = ["TORG-12", "Act-TORG-2", "Contract", "Photos"]
+    required_documents: List[str] = Field(default_factory=lambda: ["TORG-12", "Act-TORG-2", "Contract", "Photos"])
     uploaded_documents: List[DocumentInfo] = Field(default_factory=list)
     
     # Analysis

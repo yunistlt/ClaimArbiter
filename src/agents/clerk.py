@@ -87,6 +87,13 @@ class ClerkAgent(BaseAgent):
             card.generated_response = draft
         except Exception as e:
             logger.error(f"LLM Error in Clerk: {e}")
-            card.generated_response = "Error drafting document."
+            # Fallback: return a meaningful draft from legal strategy instead of a raw error.
+            fallback_parts = [
+                "Не удалось сгенерировать полный документ автоматически.",
+                "Ниже проект на основе текущей правовой позиции:",
+                "",
+                card.legal_strategy or "Правовая позиция пока не сформирована.",
+            ]
+            card.generated_response = "\n".join(fallback_parts)
             
         return card
