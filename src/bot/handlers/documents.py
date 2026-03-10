@@ -42,6 +42,51 @@ def delegate_task(task_type: str, description: str):
     """
     return "TASK_DELEGATED"
 
+
+def human_task_type(task_type: str) -> str:
+    mapping = {
+        "claim_processing": "претензионная работа",
+        "claim": "претензионная работа",
+        "document_drafting": "подготовка документа",
+        "legal_advice": "юридическая консультация",
+        "consultation": "юридическая консультация",
+    }
+    return mapping.get(task_type, "юридическая задача")
+
+
+def is_bot_mentioned_in_entities(text: str, entities, bot_username: str, bot_id: int) -> bool:
+    if not entities:
+        return False
+
+    for entity in entities:
+        if entity.type == "mention":
+            mention_text = text[entity.offset:entity.offset + entity.length]
+            if f"@{bot_username}".lower() == mention_text.lower():
+                return True
+        elif entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
+            return True
+
+    return False
+
+
+async def should_process_message_in_chat(message: types.Message) -> bool:
+    """
+    Rules:
+    - private chat: always process
+    - group/supergroup: only if reply to bot OR explicit mention
+    """
+    if message.chat.type == "private":
+        return True
+
+    bot_user = await message.bot.get_me()
+
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot_user.id:
+        return True
+
+    text_for_mentions = message.text or message.caption or ""
+    entities = message.entities or message.caption_entities
+    return is_bot_mentioned_in_entities(text_for_mentions, entities, bot_user.username, bot_user.id)
+
 async def chat_with_llm(message: types.Message):
     """
     General chat capabilities with INTELLIGENT ROUTING.
@@ -107,7 +152,7 @@ async def chat_with_llm(message: types.Message):
                 t_type = args.get("task_type", "claim_processing")
                 desc = args.get("description", "No description")
                 
-                await message.answer(f"🔄 Вас понял. Поручаю задачу отделу: {t_type}...")
+                await message.answer(f"🔄 Вас понял. Поручаю задачу отделу: {human_task_type(t_type)}...")
                 
                 # Update card context
                 card.task_type = t_type
@@ -117,7 +162,7 @@ async def chat_with_llm(message: types.Message):
                 await run_delegated_task(message, card)
                 
                 # Bot record
-                IncidentManager.add_message(message.chat.id, "bot", f"Delegated task: {t_type}", "ZMK_Bot")
+                IncidentManager.add_message(message.chat.id, "bot", f"Поручена задача отделу: {human_task_type(t_type)}", "ZMK_Bot")
                 return
         
         # 5. Normal Response (Just talk)
@@ -138,7 +183,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
     """
     Orchestrates the workflow based on task type.
     """
-    status_msg = await message.answer(f"📂 Начинаю работу по задаче: {card.task_type}...")
+    status_msg = await message.answer(f"📂 Начинаю работу по задаче: {human_task_type(card.task_type)}...")
     
     # --- Workflow 1: Claim Processing (Standard Pipeline) ---
     if card.task_type in ["claim_processing", "claim"]:
@@ -171,17 +216,44 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
 
     # Final Result
     await status_msg.delete()
+
+    def has_pipeline_error(current_card: IncidentCard) -> bool:
+        """
+        Detect known error markers across pipeline outputs.
+        """
+        fields = [
+            current_card.technical_verdict,
+            current_card.legal_strategy,
+            current_card.generated_response,
+        ]
+        markers = ["error", "ошибка", "не удалось"]
+        for value in fields:
+            if not value:
+                continue
+            lowered = value.lower()
+            if any(marker in lowered for marker in markers):
+                return True
+        return False
+
+    pipeline_failed = has_pipeline_error(card)
     
     # Display text preview
-    result_text = (
-        f"✅ <b>Готово:</b>\n\n"
-        f"<code>{card.generated_response}</code>\n\n"
-        f"Формирую файл..."
-    )
+    if pipeline_failed:
+        result_text = (
+            f"⚠️ <b>Частичный результат:</b>\n\n"
+            f"<code>{card.generated_response}</code>\n\n"
+            f"Файл не формирую: в одном из этапов возникла ошибка."
+        )
+    else:
+        result_text = (
+            f"✅ <b>Готово:</b>\n\n"
+            f"<code>{card.generated_response}</code>\n\n"
+            f"Формирую файл..."
+        )
     await message.answer(result_text)
 
     # --- Generate and Send PDF ---
-    if card.generated_response and not card.generated_response.startswith("Error"):
+    if card.generated_response and not pipeline_failed:
         pdf_filename = f"ZMK_Doc_{card.chat_id}_{message.message_id}.pdf"
         temp_dir = tempfile.gettempdir()
         full_pdf_path = os.path.join(temp_dir, pdf_filename)
@@ -204,7 +276,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
             logger.error(f"Error generating PDF: {e}")
             await message.answer("⚠️ Произошла ошибка при генерации PDF.")
     elif card.generated_response:
-        await message.answer("⚠️ Документ не был сформирован полностью. Уточните задачу (тип документа и компанию-отправителя) и повторите запрос.")
+        await message.answer("⚠️ Документ не был сформирован полностью. Проверьте формулировку запроса и повторите запуск.")
     
 @router.message(F.document | F.photo, IsAllowedUser())
 async def handle_document_upload(message: types.Message):
@@ -212,6 +284,10 @@ async def handle_document_upload(message: types.Message):
     Handles file upload by sending it to Secretary Agent.
     """
     chat_id = message.chat.id
+
+    if not await should_process_message_in_chat(message):
+        logger.info(f"Ignored document from {message.from_user.id} in group without mention/reply.")
+        return
     
     # 1. Extract File Info
     file_id = ""
@@ -316,35 +392,7 @@ async def handle_text_message(message: types.Message):
     )
 
     text = message.text.lower()
-    keywords = [
-        "претензия", "брак", "дефект", "сломалось", "не работает", "возврат", "рекламац", "ошибка", "проблема",
-        "анализ", "провер", "статус", "ситуаци", "помощь", "бот", "@zmkclaim_bot",
-        "пдф", "сформируй", "ответ", "письмо", "проект", "составь", "сделай", "договор", "иск", "юрист", "консультац"
-    ]
-    
-    # Logic for replying
-    should_reply = False
-    bot_user = await message.bot.get_me()
-
-    # 1. Private Chat -> Always reply
-    if message.chat.type == "private":
-        should_reply = True
-    
-    # 2. Reply to Bot's message -> Always reply
-    elif message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot_user.id:
-        should_reply = True
-            
-    # 3. Mentioned (Tagged) -> Always reply
-    elif message.entities:
-        for entity in message.entities:
-            if entity.type == "mention":
-                mention_text = message.text[entity.offset:entity.offset+entity.length]
-                if f"@{bot_user.username}".lower() == mention_text.lower():
-                    should_reply = True
-                    break
-            elif entity.type == "text_mention" and entity.user.id == bot_user.id:
-                should_reply = True
-                break
+    should_reply = await should_process_message_in_chat(message)
     
     # Direct PDF generation trigger (legacy override)
     if should_reply and ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):

@@ -68,11 +68,11 @@ class SecretaryAgent(BaseAgent):
         Returns context-aware list of required documents.
         """
         if card.task_type in ["document_drafting", "legal_advice", "consultation"]:
-            # For contract drafting/review don't ask for warehouse docs like TORG-12 by default.
-            return ["Contract"]
+            # Для согласования договоров не требуем складские документы.
+            return ["Договор"]
 
         # Default flow for claims/defects.
-        return ["TORG-12", "Act-TORG-2", "Contract", "Photos"]
+        return ["ТОРГ-12", "Акт ТОРГ-2", "Договор", "Фото"]
 
     async def extract_content(self, file_info: DocumentInfo, text_fallback: Optional[str] = None) -> str:
         """
@@ -91,15 +91,32 @@ class SecretaryAgent(BaseAgent):
         Returns missing required documents.
         """
         required_docs = self.get_required_documents(card)
-        uploaded_names = [d.file_name.upper() for d in card.uploaded_documents]
+        uploaded_names = [(d.file_name or "").upper() for d in card.uploaded_documents]
         missing = []
         for req in required_docs:
-            # Simple substring check (heuristic) - replace with semantic check later
-            found = any(req.upper() in name for name in uploaded_names)
-            # Special check for 'Contract'
-            if req == "Contract" and card.contract_number:
-                found = True
+            found = self._is_requirement_satisfied(req, uploaded_names, card)
             
             if not found:
                 missing.append(req)
         return missing
+
+    def _is_requirement_satisfied(self, requirement: str, uploaded_names: List[str], card: IncidentCard) -> bool:
+        if requirement == "Договор":
+            if card.contract_number:
+                return True
+            contract_markers = ["ДОГОВОР", "CONTRACT", "СОГЛАШЕНИЕ", "AGREEMENT", "ДОП.СОГЛ", "ДС"]
+            return any(any(marker in name for marker in contract_markers) for name in uploaded_names)
+
+        if requirement == "Акт ТОРГ-2":
+            act_markers = ["ТОРГ-2", "TORG-2", "АКТ", "ACT"]
+            return any(any(marker in name for marker in act_markers) for name in uploaded_names)
+
+        if requirement == "ТОРГ-12":
+            invoice_markers = ["ТОРГ-12", "TORG-12"]
+            return any(any(marker in name for marker in invoice_markers) for name in uploaded_names)
+
+        if requirement == "Фото":
+            photo_markers = ["PHOTO_", ".JPG", ".JPEG", ".PNG", "ФОТО"]
+            return any(any(marker in name for marker in photo_markers) for name in uploaded_names)
+
+        return any(requirement.upper() in name for name in uploaded_names)
