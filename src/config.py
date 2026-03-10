@@ -18,3 +18,9 @@ raw_reviewer_ids = os.getenv("LAWYER_REVIEWER_IDS", "")
 LAWYER_REVIEWER_IDS = [int(id.strip()) for id in raw_reviewer_ids.split(",") if id.strip().isdigit()]
 if not LAWYER_REVIEWER_IDS:
 	LAWYER_REVIEWER_IDS = ALLOWED_USER_IDS
+
+# Если включено, пользователь в личке будет автоматически добавлен в allowlist
+# при первом обращении. Значения: 1/true/yes/on.
+AUTO_ALLOW_PRIVATE_USERS = os.getenv("AUTO_ALLOW_PRIVATE_USERS", "1").strip().lower() in [
+    "1", "true", "yes", "on"
+]

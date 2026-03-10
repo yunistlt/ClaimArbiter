@@ -2,6 +2,7 @@ from aiogram import Router, types, F
 from aiogram.filters import Command, CommandStart  # Keep explicit imports for clarity
 from bot.filters import IsAllowedUser
 from services.access_control import AccessControl
+from config import AUTO_ALLOW_PRIVATE_USERS
 
 router = Router()
 access_control = AccessControl()
@@ -45,14 +46,27 @@ async def command_start_unauthorized(message: types.Message) -> None:
     """
     Handler for unauthorized users in PM.
     """
+    if AUTO_ALLOW_PRIVATE_USERS and message.chat.type == "private" and message.from_user:
+        access_control.add_user(message.from_user.id)
+        await message.answer(
+            f"✅ Доступ в личке активирован, {message.from_user.full_name}.\n"
+            "Теперь можно писать запрос в свободной форме."
+        )
+        return
+
     await message.answer(unauthorized_private_text(message.from_user.id))
 
 
-@router.message(F.chat.type == "private", ~IsAllowedUser())
+@router.message(F.chat.type == "private", ~F.text.startswith('/'), ~IsAllowedUser())
 async def private_message_unauthorized(message: types.Message) -> None:
     """
     Prevent silent drops for unauthorized users in private chats.
     """
+    if AUTO_ALLOW_PRIVATE_USERS and message.from_user:
+        access_control.add_user(message.from_user.id)
+        await message.answer("✅ Доступ в личке активирован. Повторите, пожалуйста, ваш запрос.")
+        return
+
     await message.answer(unauthorized_private_text(message.from_user.id))
 
 @router.message(CommandStart(), IsAllowedUser())
