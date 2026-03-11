@@ -107,3 +107,15 @@ class IncidentManager:
         if len(card.chat_history) > 50:
              card.chat_history = card.chat_history[-50:]
         cls.update_incident(chat_id, card)
+
+    @classmethod
+    def get_diagnostics(cls) -> dict:
+        cls._ensure_loaded()
+        cls._ensure_storage_ready()
+        return {
+            "storage_path": cls._storage_file,
+            "storage_exists": os.path.exists(cls._storage_file),
+            "legacy_storage_exists": os.path.exists(cls.LEGACY_STORAGE_FILE),
+            "incidents_count": len(cls._incidents),
+            "messages_count": sum(len(card.chat_history) for card in cls._incidents.values()),
+        }

@@ -144,3 +144,12 @@ class AccessControl:
     def get_known_chats(self) -> Set[int]:
         """Return list of known work chats."""
         return self.chats
+
+    def get_diagnostics(self) -> dict:
+        return {
+            "db_path": self.DB_PATH,
+            "db_exists": os.path.exists(self.DB_PATH),
+            "legacy_file_exists": os.path.exists(self.LEGACY_FILE_PATH),
+            "known_users": len(self.users),
+            "known_chats": len(self.chats),
+        }

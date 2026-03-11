@@ -2,10 +2,13 @@ from aiogram import Router, types, F
 from aiogram.filters import Command, CommandStart  # Keep explicit imports for clarity
 from bot.filters import IsAllowedUser
 from services.access_control import AccessControl
+from services.incident_manager import IncidentManager
+from services.review_queue import ReviewQueue
 from config import AUTO_ALLOW_PRIVATE_USERS
 
 router = Router()
 access_control = AccessControl()
+review_queue = ReviewQueue()
 
 
 def unauthorized_private_text(user_id: int) -> str:
@@ -92,6 +95,7 @@ async def command_help_handler(message: types.Message) -> None:
     await message.answer("Доступные команды:\n"
                          "/start - Начало работы\n"
                          "/status - Правовая оценка ситуации\n"
+                         "/diag - Диагностика состояния памяти и хранилищ\n"
                          "/write - Генерация документа (в разработке)\n"
                          "/files - Список документов (в разработке)\n\n"
                          "Команды юриста (в личном чате):\n"
@@ -100,3 +104,29 @@ async def command_help_handler(message: types.Message) -> None:
                          "/review_queue - Очередь на проверку\n"
                          "/review_approve <id> - Согласовать и отправить\n"
                          "/review_reject <id> <причина> - Отклонить")
+
+
+@router.message(Command("diag"), IsAllowedUser())
+async def command_diag_handler(message: types.Message) -> None:
+    incident_diag = IncidentManager.get_diagnostics()
+    access_diag = access_control.get_diagnostics()
+    review_diag = review_queue.get_diagnostics()
+
+    text = (
+        "🧪 <b>Диагностика состояния</b>\n\n"
+        f"Инциденты: <b>{incident_diag['incidents_count']}</b>\n"
+        f"Сообщения в памяти: <b>{incident_diag['messages_count']}</b>\n"
+        f"Файл инцидентов: <code>{incident_diag['storage_path']}</code>\n"
+        f"Файл инцидентов существует: <b>{'да' if incident_diag['storage_exists'] else 'нет'}</b>\n"
+        f"Legacy incidents.json остался: <b>{'да' if incident_diag['legacy_storage_exists'] else 'нет'}</b>\n\n"
+        f"База доступа: <code>{access_diag['db_path']}</code>\n"
+        f"База доступа существует: <b>{'да' if access_diag['db_exists'] else 'нет'}</b>\n"
+        f"Известных пользователей: <b>{access_diag['known_users']}</b>\n"
+        f"Известных чатов: <b>{access_diag['known_chats']}</b>\n"
+        f"Legacy allowed_users.json остался: <b>{'да' if access_diag['legacy_file_exists'] else 'нет'}</b>\n\n"
+        f"База очереди: <code>{review_diag['db_path']}</code>\n"
+        f"База очереди существует: <b>{'да' if review_diag['db_exists'] else 'нет'}</b>\n"
+        f"Правил согласования: <b>{review_diag['rules_count']}</b>\n"
+        f"Задач в очереди: <b>{review_diag['pending_tasks']}</b>"
+    )
+    await message.answer(text)

@@ -160,3 +160,17 @@ class ReviewQueue:
                 (reviewer_id, comment, task_id),
             )
             conn.commit()
+
+    def get_diagnostics(self) -> dict:
+        with self._conn() as conn:
+            pending_count = conn.execute(
+                "SELECT COUNT(*) FROM review_tasks WHERE status = 'pending'"
+            ).fetchone()[0]
+            rules_count = conn.execute("SELECT COUNT(*) FROM review_rules").fetchone()[0]
+
+        return {
+            "db_path": self.DB_PATH,
+            "db_exists": os.path.exists(self.DB_PATH),
+            "pending_tasks": pending_count,
+            "rules_count": rules_count,
+        }
