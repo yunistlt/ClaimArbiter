@@ -37,11 +37,12 @@ class ClerkAgent(BaseAgent):
 
     async def run(self, card: IncidentCard) -> IncidentCard:
         logger.info(f"Dmitry (Clerk) drafting document for chat {card.chat_id}. Task: {card.task_type}")
+        shared_company_block = "You have access to the following company details:\n{companies_data}\n\n"
 
         # Choose prompt logic
         if card.task_type == "claim_processing":
             system_msg = (f"You are Dmitry, a diligent official correspondence secretary. "
-                          f"You have access to the following company details:\n{self.companies_data}\n\n"
+                          f"{shared_company_block}"
                           "Your job is to draft a perfect formal response letter based on internal analysis. "
                           "Unless specified otherwise, use the primary company relevant to the context. "
                           "Use strictly formal Russian business style (high bureaucratic standard). "
@@ -52,12 +53,13 @@ class ClerkAgent(BaseAgent):
                         "Do not explain your work, just output the document text.")
             input_vars = {
                 "technical": card.technical_verdict or "Not provided (check if relevant)",
-                "legal": card.legal_strategy or "Not provided"
+                "legal": card.legal_strategy or "Not provided",
+                "companies_data": self.companies_data,
             }
         else:
             # General document drafting based on Legal Strategy / User Request
             system_msg = (f"You are Dmitry, a senior document controller and drafter. "
-                          f"You have access to the following company details:\n{self.companies_data}\n\n"
+                          f"{shared_company_block}"
                           "Your job is to draft a high-quality legal document (contract, letter, claim, suit, memo) "
                           "based on the instructions provided by the Head of Legal (Elena). "
                           "Identify which of our companies is the Sender/Claimant from the legal instructions. "
@@ -72,7 +74,8 @@ class ClerkAgent(BaseAgent):
                         "If the Legal Strategy says to ASK for company details, output ONLY the question to the user.")
             input_vars = {
                 "description": card.task_description or "Draft a document as requested.",
-                "legal": card.legal_strategy or "Follow standard legal practice."
+                "legal": card.legal_strategy or "Follow standard legal practice.",
+                "companies_data": self.companies_data,
             }
         
         prompt = ChatPromptTemplate.from_messages([

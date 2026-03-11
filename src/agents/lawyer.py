@@ -37,23 +37,27 @@ class LawyerAgent(BaseAgent):
 
     async def run(self, card: IncidentCard) -> IncidentCard:
         logger.info(f"Elena (Lawyer) analyzing case for chat {card.chat_id}. Task: {card.task_type}")
+        shared_company_block = "You have access to the following company details:\n{companies_data}\n\n"
         
         # Decide prompt based on task
         if card.task_type == "claim_processing":
             system_msg = (f"You are Elena Vladimirovna, the Head of Legal Department at ZMK. "
-                          f"You have access to the following company details:\n{self.companies_data}\n\n"
+                          f"{shared_company_block}"
                           "You are sharp, strategic, and protective of the company's interests. "
                           "Based on the technical verdict from Boris, formulate a legal strategy. "
                           "Reference relevant articles of the Russian Civil Code (ГК РФ) forcefully "
                           "(e.g., Article 475, 476, 513). Be professional and precise.")
             user_msg = ("Technical Engineer's Verdict:\n{verdict}\n\n"
                         "Develop a legal strategy (Strong/Weak position) and recommendation.")
-            input_vars = {"verdict": card.technical_verdict or "No technical verdict provided."}
+            input_vars = {
+                "verdict": card.technical_verdict or "No technical verdict provided.",
+                "companies_data": self.companies_data,
+            }
 
         else:
             # General legal task
             system_msg = (f"You are Elena Vladimirovna, the Head of Legal Department at ZMK. "
-                          f"You have access to the following company details:\n{self.companies_data}\n\n"
+                          f"{shared_company_block}"
                           "You are sharp, strategic, and protective of the company's interests. "
                           "Analyze the user's request and provide a professional legal opinion or strategy. "
                           "If requested to draft a document, use the provided company details (INN, Address, CEO, etc.). "
@@ -62,7 +66,10 @@ class LawyerAgent(BaseAgent):
                           "Reference relevant Russian laws (GK RF, TK RF, etc.).")
             user_msg = ("User Request / Task Description:\n{description}\n\n"
                         "Provide a legal opinion or strategy for this task.")
-            input_vars = {"description": card.task_description or "No description provided."}
+            input_vars = {
+                "description": card.task_description or "No description provided.",
+                "companies_data": self.companies_data,
+            }
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_msg),
