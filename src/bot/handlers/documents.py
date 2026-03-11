@@ -146,7 +146,7 @@ def should_process_document_upload(message: types.Message, default_should_proces
 
 def is_force_run_command(text: str) -> bool:
     """
-    Detect explicit user commands to start/restart delegated processing.
+    Detect explicit user commands to start or restart delegated processing.
     """
     normalized = (text or "").strip().lower()
     if not normalized:
