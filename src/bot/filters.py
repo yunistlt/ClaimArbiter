@@ -25,6 +25,7 @@ class IsAllowedUser(BaseFilter):
             access_control.add_chat(message.chat.id)
             # Запоминаем пользователя (на всякий случай, чтобы быстрее отвечать в ЛС)
             access_control.add_user(user_id)
+            access_control.set_active_chat(user_id, message.chat.id)
             return True
         
         # 2. Поведение в личке: Проверка

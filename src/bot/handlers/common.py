@@ -123,6 +123,7 @@ async def command_diag_handler(message: types.Message) -> None:
         f"База доступа существует: <b>{'да' if access_diag['db_exists'] else 'нет'}</b>\n"
         f"Известных пользователей: <b>{access_diag['known_users']}</b>\n"
         f"Известных чатов: <b>{access_diag['known_chats']}</b>\n"
+        f"Связок пользователь→чат: <b>{access_diag['active_context_links']}</b>\n"
         f"Legacy allowed_users.json остался: <b>{'да' if access_diag['legacy_file_exists'] else 'нет'}</b>\n\n"
         f"База очереди: <code>{review_diag['db_path']}</code>\n"
         f"База очереди существует: <b>{'да' if review_diag['db_exists'] else 'нет'}</b>\n"

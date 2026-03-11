@@ -10,6 +10,7 @@ from models import IncidentCard, DocumentInfo
 from services.incident_manager import IncidentManager
 from services.pdf_service import create_pdf
 from services.review_queue import ReviewQueue
+from services.access_control import AccessControl
 from aiogram.types import FSInputFile
 from bot.filters import IsAllowedUser
 from aiogram.filters import Command
@@ -98,6 +99,17 @@ def is_bot_mentioned_in_entities(text: str, entities, bot_username: str, bot_id:
             return True
 
     return False
+
+
+def resolve_context_chat_id(message: types.Message) -> int:
+    """
+    In PM, continue working with the user's last active work chat context if known.
+    """
+    if message.chat.type == "private" and message.from_user:
+        linked_chat_id = AccessControl().get_active_chat(message.from_user.id)
+        if linked_chat_id:
+            return linked_chat_id
+    return message.chat.id
 
 
 async def should_process_message_in_chat(message: types.Message) -> bool:
@@ -207,7 +219,8 @@ async def chat_with_llm(message: types.Message):
     llm_with_tools = llm.bind_tools(tools)
     
     # 2. Get history
-    card = IncidentManager.get_or_create_incident(message.chat.id)
+    context_chat_id = resolve_context_chat_id(message)
+    card = IncidentManager.get_or_create_incident(context_chat_id)
     chat_history = card.chat_history[-20:] # Reduced from 50 to avoid token limits with large docs
     history_entries = []
     
@@ -265,12 +278,12 @@ async def chat_with_llm(message: types.Message):
                 # Update card context
                 card.task_type = t_type
                 card.task_description = desc
-                IncidentManager.update_incident(message.chat.id, card)
+                IncidentManager.update_incident(context_chat_id, card)
                 
                 await run_delegated_task(message, card)
                 
                 # Bot record
-                IncidentManager.add_message(message.chat.id, "bot", f"Поручена задача отделу: {human_task_type(t_type)}", "ZMK_Bot")
+                IncidentManager.add_message(context_chat_id, "bot", f"Поручена задача отделу: {human_task_type(t_type)}", "ZMK_Bot")
                 return
         
         # 5. Normal Response (Just talk)
@@ -279,7 +292,7 @@ async def chat_with_llm(message: types.Message):
              # Fallback if LLM tried to call tool but failed or sent empty content
              response_text = "Принято. Работаем."
              
-        IncidentManager.add_message(message.chat.id, "bot", response_text, "ZMK_Bot")
+        IncidentManager.add_message(context_chat_id, "bot", response_text, "ZMK_Bot")
         await message.answer(response_text)
         
     except Exception as e:
@@ -526,7 +539,7 @@ async def handle_document_upload(message: types.Message):
     """
     Handles file upload by sending it to Secretary Agent.
     """
-    chat_id = message.chat.id
+    chat_id = resolve_context_chat_id(message)
 
     default_should_process = await should_process_message_in_chat(message)
     if not should_process_document_upload(message, default_should_process):
@@ -625,11 +638,13 @@ async def handle_text_message(message: types.Message):
          name = message.forward_from.full_name if message.forward_from else message.forward_sender_name
          forward_label = f"[Forwarded from {name}]: "
 
+    context_chat_id = resolve_context_chat_id(message)
+
     final_content = forward_label + message.text
 
     # 2. Record incoming message
     IncidentManager.add_message(
-        chat_id=message.chat.id,
+        chat_id=context_chat_id,
         role="user",
         content=final_content,
         username=message.from_user.full_name
@@ -637,7 +652,7 @@ async def handle_text_message(message: types.Message):
 
     text = message.text.lower()
     should_reply = await should_process_message_in_chat(message)
-    card = IncidentManager.get_or_create_incident(message.chat.id)
+    card = IncidentManager.get_or_create_incident(context_chat_id)
 
     # Deterministic trigger for explicit user commands like "анализ" / "делай".
     if should_reply and is_force_run_command(message.text or ""):
@@ -647,7 +662,7 @@ async def handle_text_message(message: types.Message):
             if card.task_type in ["claim", "claim_processing"] and "договор" in card.task_description.lower():
                 card.task_type = "document_drafting"
 
-            IncidentManager.update_incident(message.chat.id, card)
+            IncidentManager.update_incident(context_chat_id, card)
             await message.answer("🔄 Принято. Запускаю подготовку с учетом ваших уточнений...")
             await run_delegated_task(message, card)
             return
@@ -655,7 +670,7 @@ async def handle_text_message(message: types.Message):
     # Direct PDF generation trigger (legacy override)
     if should_reply and ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
          # Получаем текущее состояние
-         card = IncidentManager.get_or_create_incident(message.chat.id)
+         card = IncidentManager.get_or_create_incident(context_chat_id)
          
          # Guess task type if not set
          if not card.task_type or card.task_type == "claim": # default "claim" might be old value

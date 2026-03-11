@@ -18,6 +18,7 @@ class AccessControl:
             cls._instance = super(AccessControl, cls).__new__(cls)
             cls._instance.users = set()
             cls._instance.chats = set()
+            cls._instance.active_chat_by_user = {}
             cls._instance._init_db()
             cls._instance.load_data()
         return cls._instance
@@ -44,6 +45,15 @@ class AccessControl:
                     CREATE TABLE IF NOT EXISTS allowed_chats (
                         chat_id INTEGER PRIMARY KEY,
                         first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS active_user_chats (
+                        user_id INTEGER PRIMARY KEY,
+                        chat_id INTEGER NOT NULL,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                     """
                 )
@@ -99,11 +109,14 @@ class AccessControl:
                 self.users = {row[0] for row in cursor.fetchall()}
                 cursor.execute("SELECT chat_id FROM allowed_chats")
                 self.chats = {row[0] for row in cursor.fetchall()}
+                cursor.execute("SELECT user_id, chat_id FROM active_user_chats")
+                self.active_chat_by_user = {row[0]: row[1] for row in cursor.fetchall()}
             logger.info(f"Loaded {len(self.users)} allowed users and {len(self.chats)} chats.")
         except Exception as e:
             logger.error(f"Error loading access data: {e}")
             self.users = set()
             self.chats = set()
+            self.active_chat_by_user = {}
 
     def save_data(self):
         """No-op: DB writes happen incrementally in add_user/add_chat."""
@@ -145,6 +158,23 @@ class AccessControl:
         """Return list of known work chats."""
         return self.chats
 
+    def set_active_chat(self, user_id: int, chat_id: int):
+        """Remember the latest work chat for this user to continue context in PM."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO active_user_chats(user_id, chat_id) VALUES(?, ?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id, updated_at=CURRENT_TIMESTAMP",
+                    (int(user_id), int(chat_id)),
+                )
+                conn.commit()
+            self.active_chat_by_user[user_id] = chat_id
+        except Exception as e:
+            logger.error(f"Error setting active chat {chat_id} for user {user_id}: {e}")
+
+    def get_active_chat(self, user_id: int) -> int | None:
+        return self.active_chat_by_user.get(user_id)
+
     def get_diagnostics(self) -> dict:
         return {
             "db_path": self.DB_PATH,
@@ -152,4 +182,5 @@ class AccessControl:
             "legacy_file_exists": os.path.exists(self.LEGACY_FILE_PATH),
             "known_users": len(self.users),
             "known_chats": len(self.chats),
+            "active_context_links": len(self.active_chat_by_user),
         }
