@@ -143,6 +143,58 @@ def should_process_document_upload(message: types.Message, default_should_proces
 
     return False
 
+
+def is_force_run_command(text: str) -> bool:
+    """
+    Detect explicit user commands to start/restart delegated processing.
+    """
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+
+    exact_triggers = {
+        "анализ",
+        "анализируй",
+        "делай",
+        "сделай",
+        "запускай",
+        "начинай",
+    }
+    if normalized in exact_triggers:
+        return True
+
+    phrase_triggers = [
+        "сделай анализ",
+        "запусти анализ",
+        "подготовь документ",
+        "сформируй документ",
+        "переформируй",
+        "перезапусти",
+    ]
+    return any(trigger in normalized for trigger in phrase_triggers)
+
+
+def enrich_task_description(card: IncidentCard, latest_user_text: str) -> str:
+    """
+    Keep prior task context and append meaningful clarifications from latest message.
+    """
+    base = (card.task_description or "").strip()
+    latest = (latest_user_text or "").strip()
+    if not latest:
+        return base or "No description"
+
+    if is_force_run_command(latest):
+        return base or latest
+
+    if not base:
+        return latest
+
+    # Avoid bloating prompt with duplicate repeats.
+    if latest.lower() in base.lower():
+        return base
+
+    return f"{base}\nУточнение пользователя: {latest}"
+
 async def chat_with_llm(message: types.Message):
     """
     General chat capabilities with INTELLIGENT ROUTING.
@@ -585,6 +637,20 @@ async def handle_text_message(message: types.Message):
 
     text = message.text.lower()
     should_reply = await should_process_message_in_chat(message)
+    card = IncidentManager.get_or_create_incident(message.chat.id)
+
+    # Deterministic trigger for explicit user commands like "анализ" / "делай".
+    if should_reply and is_force_run_command(message.text or ""):
+        has_context = bool(card.uploaded_documents or card.task_description)
+        if has_context:
+            card.task_description = enrich_task_description(card, message.text)
+            if card.task_type in ["claim", "claim_processing"] and "договор" in card.task_description.lower():
+                card.task_type = "document_drafting"
+
+            IncidentManager.update_incident(message.chat.id, card)
+            await message.answer("🔄 Принято. Запускаю подготовку с учетом ваших уточнений...")
+            await run_delegated_task(message, card)
+            return
     
     # Direct PDF generation trigger (legacy override)
     if should_reply and ("пдф" in text or "pdf" in text or "письмо" in text) and ("сделай" in text or "сформируй" in text or "пришли" in text):
