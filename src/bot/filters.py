@@ -1,7 +1,7 @@
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 import logging
-from config import ALLOWED_USER_IDS
+from config import ALLOWED_USER_IDS, AUTO_ALLOW_PRIVATE_USERS
 from services.access_control import AccessControl
 
 class IsAllowedUser(BaseFilter):
@@ -33,6 +33,10 @@ class IsAllowedUser(BaseFilter):
         if ALLOWED_USER_IDS and user_id in ALLOWED_USER_IDS:
              return True
         if access_control.is_user_known(user_id):
+            return True
+        if AUTO_ALLOW_PRIVATE_USERS:
+            access_control.add_user(user_id)
+            logging.info(f"Auto-authorized private user {user_id}.")
             return True
 
         # б) Если пользователя нет в кеше, ищем его в известных чатах

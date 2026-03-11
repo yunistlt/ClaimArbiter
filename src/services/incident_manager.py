@@ -13,12 +13,34 @@ class IncidentManager:
     Uses a simple JSON file for persistence across restarts.
     """
     _incidents: Dict[int, IncidentCard] = {}
-    _storage_file: str = "incidents.json"
+    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    LEGACY_STORAGE_FILE = os.path.join(BASE_DIR, "incidents.json")
+    _storage_file: str = os.getenv("INCIDENTS_STORAGE_PATH", os.path.join(DATA_DIR, "incidents.json"))
     _loaded: bool = False
+
+    @classmethod
+    def _ensure_storage_ready(cls):
+        os.makedirs(os.path.dirname(cls._storage_file), exist_ok=True)
+
+    @classmethod
+    def _migrate_legacy_storage_if_needed(cls):
+        if cls._storage_file == cls.LEGACY_STORAGE_FILE:
+            return
+        if os.path.exists(cls._storage_file) or not os.path.exists(cls.LEGACY_STORAGE_FILE):
+            return
+
+        try:
+            os.replace(cls.LEGACY_STORAGE_FILE, cls._storage_file)
+            logger.info("Migrated incidents storage to persistent data directory.")
+        except Exception as e:
+            logger.error(f"Error migrating incidents storage: {e}")
 
     @classmethod
     def load_from_disk(cls):
         """Loads incidents from the JSON file."""
+        cls._ensure_storage_ready()
+        cls._migrate_legacy_storage_if_needed()
         if not os.path.exists(cls._storage_file):
             return
             
@@ -41,6 +63,7 @@ class IncidentManager:
     def save_to_disk(cls):
         """Saves current state to JSON file."""
         try:
+            cls._ensure_storage_ready()
             data = {}
             for chat_id, card in cls._incidents.items():
                 data[str(chat_id)] = card.model_dump(mode='json')
