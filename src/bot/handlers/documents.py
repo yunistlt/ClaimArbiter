@@ -19,6 +19,7 @@ import asyncio
 import os
 import tempfile
 import logging
+import re
 
 router = Router()
 secretary = SecretaryAgent()
@@ -43,6 +44,7 @@ def delegate_task(task_type: str, description: str):
             - 'claim_processing': For product defects, returns, warranties (involves Engineer).
             - 'document_drafting': For creating contracts, claims, letters, agreements, lawsuits (no Engineer needed).
             - 'legal_advice': For complex legal questions requiring formal analysis or due diligence.
+            - 'consultation': For discussion mode, clarification and recommendations without formal document output.
         description (str): A summary of what needs to be done.
     """
     return "TASK_DELEGATED"
@@ -186,6 +188,38 @@ def is_force_run_command(text: str) -> bool:
     return any(trigger in normalized for trigger in phrase_triggers)
 
 
+def is_explicit_document_request(text: str) -> bool:
+    """
+    Detect whether the user explicitly asks for a formal document output.
+    """
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+
+    doc_markers = [
+        "подготовь письмо",
+        "составь письмо",
+        "сформируй письмо",
+        "подготовь претензи",
+        "составь претензи",
+        "сформируй претензи",
+        "подготовь ответ",
+        "составь ответ",
+        "сформируй ответ",
+        "подготовь документ",
+        "составь документ",
+        "сформируй документ",
+        "пришли pdf",
+        "сделай pdf",
+        "в pdf",
+        "официальное письмо",
+        "досудебную претензи",
+        "иск",
+        "договор",
+    ]
+    return any(marker in normalized for marker in doc_markers)
+
+
 def enrich_task_description(card: IncidentCard, latest_user_text: str) -> str:
     """
     Keep prior task context and append meaningful clarifications from latest message.
@@ -207,6 +241,36 @@ def enrich_task_description(card: IncidentCard, latest_user_text: str) -> str:
 
     return f"{base}\nУточнение пользователя: {latest}"
 
+
+def _extract_tag_block(text: str, tag: str) -> str:
+    pattern = rf"\[{re.escape(tag)}\]\s*(.*?)(?=\n\[[A-Z_]+\]|\Z)"
+    match = re.search(pattern, text or "", flags=re.S)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def update_consultation_state_from_strategy(card: IncidentCard) -> None:
+    strategy = card.legal_strategy or ""
+    card.current_stage = _extract_tag_block(strategy, "STAGE") or card.current_stage
+    card.known_facts = _extract_tag_block(strategy, "KNOWN") or card.known_facts
+    card.missing_info = _extract_tag_block(strategy, "MISSING") or card.missing_info
+    card.next_step = _extract_tag_block(strategy, "NEXT_STEP") or card.next_step
+    card.eta_text = _extract_tag_block(strategy, "ETA") or card.eta_text
+    card.key_risks = _extract_tag_block(strategy, "RISKS") or card.key_risks
+
+
+def build_consultation_response(card: IncidentCard) -> str:
+    lines = ["✅ <b>Статус юридической работы</b>"]
+    lines.append(f"<b>Этап:</b> {card.current_stage or 'первичный анализ'}")
+    lines.append(f"<b>Что уже известно:</b> {card.known_facts or 'данные собираются'}")
+    lines.append(f"<b>Чего не хватает:</b> {card.missing_info or 'критичных пробелов не выявлено'}")
+    lines.append(f"<b>Следующий шаг:</b> {card.next_step or 'уточнить факты и подготовить позицию'}")
+    lines.append(f"<b>Срок:</b> {card.eta_text or 'уточняется после проверки документов'}")
+    lines.append(f"<b>Ключевые риски:</b> {card.key_risks or 'на текущем этапе существенные риски не подтверждены'}")
+    lines.append("\nДля официального документа напишите: <b>«подготовь официальный ответ/письмо»</b>.")
+    return "\n".join(lines)
+
 async def chat_with_llm(message: types.Message):
     """
     General chat capabilities with INTELLIGENT ROUTING.
@@ -221,15 +285,17 @@ async def chat_with_llm(message: types.Message):
     # 2. Get history
     context_chat_id = resolve_context_chat_id(message)
     card = IncidentManager.get_or_create_incident(context_chat_id)
-    chat_history = card.chat_history[-20:] # Reduced from 50 to avoid token limits with large docs
+    # Use a wider window so the agent can keep discussion context, while still limiting token size.
+    chat_history = card.chat_history[-200:]
     history_entries = []
     
     for msg in chat_history:
         role_label = "System/Bot" if msg.role == "bot" else "User"
         user_label = msg.username if msg.username else role_label
-        # Clean content to avoid massive tokens
-        content = msg.content[:1000] if msg.content else ""
-        if len(msg.content) > 1000: content += "...(truncated)"
+        # Keep richer per-message context for consultation mode.
+        content = msg.content[:1500] if msg.content else ""
+        if len(msg.content or "") > 1500:
+            content += "...(truncated)"
         
         timestamp = msg.timestamp.strftime('%H:%M')
         intro = f"[{timestamp}] {user_label}: "
@@ -248,12 +314,16 @@ async def chat_with_llm(message: types.Message):
                    "   - Елена Владимировна (Юрист): общая правовая работа, договоры, суды, стратегия.\n"
                    "   - Дмитрий (Клерк): оформление красивых официальных документов.\n\n"
                    "СТРАТЕГИЯ:\n"
-                   "1. Если вопрос простой или справочный — ответь сам.\n"
-                   "2. Если требуется ОФИЦИАЛЬНЫЙ ДОКУМЕНТ или СЛОЖНЫЙ АНАЛИЗ — используй `delegate_task`.\n"
-                   "3. Выбирай правильный `task_type`:\n"
+                   "1. По умолчанию веди КОНСУЛЬТАЦИЮ: обсуждай ситуацию, уточняй факты, объясняй риски и шаги.\n"
+                   "2. Не выпускай официальный документ, пока пользователь явно не попросил его подготовить.\n"
+                   "3. Используй `delegate_task` для аналитической работы отдела, даже если документ пока не нужен.\n"
+                   "4. Выбирай правильный `task_type`:\n"
                    "   - `claim_processing`: если речь идет о БРАКЕ, ДЕФЕКТАХ, РЕКЛАМАЦИЯХ. (Нужен Борис Петрович).\n"
-                   "   - `document_drafting`: если просят составить ДОГОВОР, ПИСЬМО (не по браку), ИСК. (Инженер НЕ нужен).\n"
-                   "   - `legal_advice`: если нужен развернутый юридический совет.\n"),
+                   "   - `document_drafting`: только если пользователь ЯВНО просит подготовить официальный документ (договор, письмо, претензия, иск).\n"
+                   "   - `consultation`: если нужно обсудить кейс, собрать данные, понять позицию или дать рекомендации без формального документа.\n"
+                   "   - `legal_advice`: если нужен развернутый юридический разбор, но без обязательного выпуска документа.\n"
+                   "5. Не используй шаблонные фразы вроде 'мы всегда готовы помочь' без фактического содержания.\n"
+                   "6. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"),
         ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
     
@@ -270,8 +340,15 @@ async def chat_with_llm(message: types.Message):
             tool_call = ai_msg.tool_calls[0]
             if tool_call["name"] == "delegate_task":
                 args = tool_call["args"]
-                t_type = args.get("task_type", "claim_processing")
+                t_type = args.get("task_type", "consultation")
                 desc = args.get("description", "No description")
+                wants_document = is_explicit_document_request((message.text or "") + "\n" + desc)
+
+                # Safety: do not jump into drafting unless user explicitly asked for a document.
+                if t_type == "document_drafting" and not wants_document:
+                    t_type = "consultation"
+                elif wants_document and t_type in ["consultation", "legal_advice"]:
+                    t_type = "document_drafting"
                 
                 await message.answer(f"🔄 Вас понял. Поручаю задачу отделу: {human_task_type(t_type)}...")
                 
@@ -280,7 +357,7 @@ async def chat_with_llm(message: types.Message):
                 card.task_description = desc
                 IncidentManager.update_incident(context_chat_id, card)
                 
-                await run_delegated_task(message, card)
+                await run_delegated_task(message, card, generate_document=wants_document)
                 
                 # Bot record
                 IncidentManager.add_message(context_chat_id, "bot", f"Поручена задача отделу: {human_task_type(t_type)}", "ZMK_Bot")
@@ -300,7 +377,7 @@ async def chat_with_llm(message: types.Message):
         # Show specific error to user for debugging (temporary)
         await message.answer(f"⚠️ Ошибка в модуле решений (LLM): {str(e)}")
 
-async def run_delegated_task(message: types.Message, card: IncidentCard):
+async def run_delegated_task(message: types.Message, card: IncidentCard, generate_document: bool = False):
     """
     Orchestrates the workflow based on task type.
     """
@@ -316,9 +393,12 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         await status_msg.edit_text("⚖️ <b>Елена Владимировна (Юрист)</b> оценивает риски...")
         card = await lawyer.run(card)
         
-        # 3. Drafting
-        await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> готовит ответ...")
-        card = await clerk.run(card)
+        # 3. Drafting only on explicit user request
+        if generate_document:
+            await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> готовит ответ...")
+            card = await clerk.run(card)
+        else:
+            card.generated_response = None
 
     # --- Workflow 2: General Document Drafting / Legal Advice ---
     elif card.task_type in ["document_drafting", "legal_advice", "consultation"]:
@@ -330,10 +410,13 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         # Ideally, LawyerAgent should see the `task_description`.
         card = await lawyer.run(card)
         
-        # 2. Drafting (if needed)
-        if card.task_type == "document_drafting" or card.generated_response is None:
-             await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> составляет документ...")
-             card = await clerk.run(card)
+        # 2. Drafting only when explicitly requested or task requires a formal document.
+        should_draft = card.task_type == "document_drafting" or generate_document
+        if should_draft:
+            await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> составляет документ...")
+            card = await clerk.run(card)
+        else:
+            card.generated_response = None
 
     # Final Result
     await status_msg.delete()
@@ -357,7 +440,14 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         return False
 
     pipeline_failed = has_pipeline_error(card)
+
+    # Keep an operational consultation state for grounded status replies.
+    update_consultation_state_from_strategy(card)
     
+    # Persist latest state to keep long-term context per chat.
+    context_chat_id = resolve_context_chat_id(message)
+    IncidentManager.update_incident(context_chat_id, card)
+
     # Display text preview
     if pipeline_failed:
         result_text = (
@@ -365,6 +455,8 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
             f"<code>{card.generated_response}</code>\n\n"
             f"Файл не формирую: в одном из этапов возникла ошибка."
         )
+    elif not generate_document:
+        result_text = build_consultation_response(card)
     else:
         result_text = (
             f"✅ <b>Готово:</b>\n\n"
@@ -374,7 +466,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
     await message.answer(result_text)
 
     # --- Route by review rules ---
-    if card.generated_response and not pipeline_failed:
+    if generate_document and card.generated_response and not pipeline_failed:
         mode = review_queue.get_rule(card.task_type)
 
         if mode == "manual":
@@ -413,7 +505,7 @@ async def run_delegated_task(message: types.Message, card: IncidentCard):
         )
         if not sent:
             await message.answer("⚠️ Ошибка: Не удалось создать PDF файл.")
-    elif card.generated_response:
+    elif generate_document and card.generated_response:
         await message.answer("⚠️ Документ не был сформирован полностью. Проверьте формулировку запроса и повторите запуск.")
 
 
@@ -663,8 +755,10 @@ async def handle_text_message(message: types.Message):
                 card.task_type = "document_drafting"
 
             IncidentManager.update_incident(context_chat_id, card)
-            await message.answer("🔄 Принято. Запускаю подготовку с учетом ваших уточнений...")
-            await run_delegated_task(message, card)
+            wants_document = is_explicit_document_request(message.text or "")
+            run_mode = "подготовку документа" if wants_document else "консультационный разбор"
+            await message.answer(f"🔄 Принято. Запускаю {run_mode} с учетом ваших уточнений...")
+            await run_delegated_task(message, card, generate_document=wants_document)
             return
     
     # Direct PDF generation trigger (legacy override)
@@ -684,7 +778,7 @@ async def handle_text_message(message: types.Message):
                   card.task_type = "claim_processing"
                   
          await message.answer("🔄 Принято. Начинаю формирование документа...")
-         await run_delegated_task(message, card)
+         await run_delegated_task(message, card, generate_document=True)
          return 
 
     # В личке или при ответе - всегда слушаем LLM

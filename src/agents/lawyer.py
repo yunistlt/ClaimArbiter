@@ -44,11 +44,16 @@ class LawyerAgent(BaseAgent):
             system_msg = (f"You are Elena Vladimirovna, the Head of Legal Department at ZMK. "
                           f"{shared_company_block}"
                           "You are sharp, strategic, and protective of the company's interests. "
-                          "Based on the technical verdict from Boris, formulate a legal strategy. "
-                          "Reference relevant articles of the Russian Civil Code (ГК РФ) forcefully "
+                          "Based on the technical verdict from Boris, formulate a legal strategy for consultation first. "
+                          "Do NOT draft a formal letter here. "
+                          "Always return answer in Russian and STRICTLY in this format with tags: "
+                          "[STAGE], [KNOWN], [MISSING], [NEXT_STEP], [ETA], [RISKS]. "
+                          "Each tag must be present exactly once. "
+                          "Use concise business phrasing, no generic pleasantries. "
+                          "Reference relevant articles of the Russian Civil Code (ГК РФ) where applicable "
                           "(e.g., Article 475, 476, 513). Be professional and precise.")
             user_msg = ("Technical Engineer's Verdict:\n{verdict}\n\n"
-                        "Develop a legal strategy (Strong/Weak position) and recommendation.")
+                        "Develop internal consultation strategy in tagged format.")
             input_vars = {
                 "verdict": card.technical_verdict or "No technical verdict provided.",
                 "companies_data": self.companies_data,
@@ -63,9 +68,12 @@ class LawyerAgent(BaseAgent):
                           "If requested to draft a document, use the provided company details (INN, Address, CEO, etc.). "
                           "IMPORTANT: If the user has NOT specified which of your companies is the sender, and you have multiple options, "
                           "your strategy must be to ASK the user to clarify this (e.g., 'Which company is the sender?'). "
-                          "Reference relevant Russian laws (GK RF, TK RF, etc.).")
+                                                    "Reference relevant Russian laws (GK RF, TK RF, etc.). "
+                                                    "For consultation and legal advice tasks, return answer in Russian and STRICTLY in tagged format: "
+                                                    "[STAGE], [KNOWN], [MISSING], [NEXT_STEP], [ETA], [RISKS]. "
+                                                    "Use concise business style, no generic courtesy text.")
             user_msg = ("User Request / Task Description:\n{description}\n\n"
-                        "Provide a legal opinion or strategy for this task.")
+                                                "Provide legal strategy in tagged format.")
             input_vars = {
                 "description": card.task_description or "No description provided.",
                 "companies_data": self.companies_data,

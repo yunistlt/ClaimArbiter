@@ -102,10 +102,8 @@ class IncidentManager:
     def add_message(cls, chat_id: int, role: str, content: str, username: Optional[str] = None):
         card = cls.get_or_create_incident(chat_id)
         msg = ChatMessage(role=role, content=content, username=username)
-        # Keep recent history (increased limit for context)
+        # Keep full in-chat history to preserve discussion context.
         card.chat_history.append(msg)
-        if len(card.chat_history) > 50:
-             card.chat_history = card.chat_history[-50:]
         cls.update_incident(chat_id, card)
 
     @classmethod

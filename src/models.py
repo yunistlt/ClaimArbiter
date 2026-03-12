@@ -35,11 +35,19 @@ class IncidentCard(BaseModel):
     uploaded_documents: List[DocumentInfo] = Field(default_factory=list)
     
     # Analysis
-    task_type: str = "claim"  # 'claim', 'consultation', 'drafting'
+    task_type: str = "consultation"  # 'claim_processing', 'document_drafting', 'consultation', 'legal_advice'
     task_description: Optional[str] = None # Description of the task for general legal work
     technical_verdict: Optional[str] = None
     legal_strategy: Optional[str] = None
     generated_response: Optional[str] = None
+
+    # Consultation state (operational tracking)
+    current_stage: Optional[str] = None
+    known_facts: Optional[str] = None
+    missing_info: Optional[str] = None
+    next_step: Optional[str] = None
+    eta_text: Optional[str] = None
+    key_risks: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True
