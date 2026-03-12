@@ -2,6 +2,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from typing import List, Optional
+from services.supabase_storage import SupabaseStorage
 
 
 @dataclass
@@ -23,6 +24,7 @@ class ReviewQueue:
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     DATA_DIR = os.path.join(BASE_DIR, "data")
     DB_PATH = os.getenv("REVIEW_QUEUE_DB_PATH", os.path.join(DATA_DIR, "review_queue.db"))
+    _supabase = SupabaseStorage()
 
     def __new__(cls):
         if cls._instance is None:
@@ -85,6 +87,7 @@ class ReviewQueue:
                 (task_type, mode),
             )
             conn.commit()
+        self._supabase.upsert_review_rule(task_type, mode)
 
     def get_rule(self, task_type: str) -> str:
         with self._conn() as conn:
@@ -109,7 +112,16 @@ class ReviewQueue:
                 (chat_id, requester_user_id, requester_name, task_type, content),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            task_id = int(cur.lastrowid)
+
+        self._supabase.insert_review_task(
+            chat_id=chat_id,
+            requester_user_id=requester_user_id,
+            requester_name=requester_name,
+            task_type=task_type,
+            content=content,
+        )
+        return task_id
 
     def list_pending(self, limit: int = 20) -> List[ReviewTask]:
         with self._conn() as conn:
@@ -138,6 +150,7 @@ class ReviewQueue:
         return ReviewTask(*row) if row else None
 
     def approve(self, task_id: int, reviewer_id: int):
+        task = self.get_task(task_id)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -148,8 +161,17 @@ class ReviewQueue:
                 (reviewer_id, task_id),
             )
             conn.commit()
+        if task:
+            self._supabase.update_review_task_status_by_content(
+                chat_id=task.chat_id,
+                requester_user_id=task.requester_user_id,
+                content=task.content,
+                status="approved",
+                reviewer_id=reviewer_id,
+            )
 
     def reject(self, task_id: int, reviewer_id: int, comment: str):
+        task = self.get_task(task_id)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -160,6 +182,15 @@ class ReviewQueue:
                 (reviewer_id, comment, task_id),
             )
             conn.commit()
+        if task:
+            self._supabase.update_review_task_status_by_content(
+                chat_id=task.chat_id,
+                requester_user_id=task.requester_user_id,
+                content=task.content,
+                status="rejected",
+                reviewer_id=reviewer_id,
+                reviewer_comment=comment,
+            )
 
     def get_diagnostics(self) -> dict:
         with self._conn() as conn:

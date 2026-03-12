@@ -3,6 +3,7 @@ import os
 import sqlite3
 from typing import Set
 import json
+from services.supabase_storage import SupabaseStorage
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,7 @@ class AccessControl:
     DATA_DIR = os.path.join(BASE_DIR, "data")
     DB_PATH = os.getenv("ACCESS_CONTROL_DB_PATH", os.path.join(DATA_DIR, "access_control.db"))
     LEGACY_FILE_PATH = os.path.join(BASE_DIR, "allowed_users.json")
+    _supabase = SupabaseStorage()
     
     def __new__(cls):
         if cls._instance is None:
@@ -132,6 +134,7 @@ class AccessControl:
                 conn.execute("INSERT OR IGNORE INTO allowed_users (user_id) VALUES (?)", (int(user_id),))
                 conn.commit()
             self.users.add(user_id)
+            self._supabase.upsert_work_user(user_id)
             logger.info(f"New user authorized: {user_id}")
         except Exception as e:
             logger.error(f"Error adding user {user_id}: {e}")
@@ -146,6 +149,7 @@ class AccessControl:
                 conn.execute("INSERT OR IGNORE INTO allowed_chats (chat_id) VALUES (?)", (int(chat_id),))
                 conn.commit()
             self.chats.add(chat_id)
+            self._supabase.upsert_work_chat(chat_id)
             logger.info(f"New work chat authorized: {chat_id}")
         except Exception as e:
             logger.error(f"Error adding chat {chat_id}: {e}")
@@ -169,6 +173,9 @@ class AccessControl:
                 )
                 conn.commit()
             self.active_chat_by_user[user_id] = chat_id
+            self._supabase.upsert_work_user(user_id)
+            self._supabase.upsert_work_chat(chat_id)
+            self._supabase.upsert_active_user_chat(user_id, chat_id)
         except Exception as e:
             logger.error(f"Error setting active chat {chat_id} for user {user_id}: {e}")
 

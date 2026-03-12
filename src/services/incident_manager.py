@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pydantic import TypeAdapter
+from services.supabase_storage import SupabaseStorage
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class IncidentManager:
     LEGACY_STORAGE_FILE = os.path.join(BASE_DIR, "incidents.json")
     _storage_file: str = os.getenv("INCIDENTS_STORAGE_PATH", os.path.join(DATA_DIR, "incidents.json"))
     _loaded: bool = False
+    _supabase = SupabaseStorage()
 
     @classmethod
     def _ensure_storage_ready(cls):
@@ -97,6 +99,11 @@ class IncidentManager:
         cls._ensure_loaded()
         cls._incidents[chat_id] = card
         cls.save_to_disk()
+        try:
+            cls._supabase.upsert_work_chat(chat_id)
+            cls._supabase.upsert_legal_case(card.model_dump(mode='json'))
+        except Exception as e:
+            logger.warning(f"Supabase sync failed for incident {chat_id}: {e}")
         
     @classmethod
     def add_message(cls, chat_id: int, role: str, content: str, username: Optional[str] = None):
@@ -105,6 +112,10 @@ class IncidentManager:
         # Keep full in-chat history to preserve discussion context.
         card.chat_history.append(msg)
         cls.update_incident(chat_id, card)
+        try:
+            cls._supabase.insert_work_message(chat_id=chat_id, role=role, content=content, username=username)
+        except Exception as e:
+            logger.warning(f"Supabase message sync failed for chat {chat_id}: {e}")
 
     @classmethod
     def get_diagnostics(cls) -> dict:
