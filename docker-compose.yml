@@ -8,5 +8,17 @@ services:
       # Данные хранятся в /app/data — не стираются при пересборке/рестарте контейнера
       - bot_data:/app/data
 
+  web:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    working_dir: /app/src
+    command: python -m web.run
+
 volumes:
   bot_data:

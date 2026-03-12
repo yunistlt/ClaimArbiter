@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи — ClaimArbiter Admin{% endblock %}
+{% block page_title %}Управление доступом{% endblock %}
+
+{% block content %}
+
+{% if success == 'added' %}
+<div class="alert alert-success flash d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-check-circle-fill"></i>Пользователь добавлен.
+</div>
+{% elif success == 'removed' %}
+<div class="alert alert-warning flash d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-exclamation-triangle-fill"></i>Пользователь удалён из разрешённых.
+</div>
+{% endif %}
+
+<div class="row g-3">
+
+  <!-- Users table -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm" style="border-radius:.75rem">
+      <div class="card-body p-0">
+        <div class="px-4 pt-3 pb-2 d-flex align-items-start justify-content-between">
+          <div>
+            <h6 class="fw-semibold mb-0">Разрешённые пользователи</h6>
+            <small class="text-muted">{{ users | length }} пользователь(-ей)</small>
+          </div>
+        </div>
+        {% if users %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead style="background:#f8f9fa">
+              <tr>
+                <th style="padding-left:1.25rem">Telegram User ID</th>
+                <th>Добавлен</th>
+                <th style="width:4rem"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+              <tr>
+                <td style="padding-left:1.25rem">
+                  <code>{{ u.user_id }}</code>
+                </td>
+                <td style="font-size:.8rem; color:#6c757d">{{ u.first_seen_at or '—' }}</td>
+                <td>
+                  <form method="post" action="/users/remove"
+                        onsubmit="return confirm('Удалить пользователя {{ u.user_id }} из разрешённых?')">
+                    <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-person-x" style="font-size:2rem; display:block; margin-bottom:.5rem"></i>
+          Нет пользователей
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right column: Add user + Chats -->
+  <div class="col-lg-5 d-flex flex-column gap-3">
+
+    <!-- Add user -->
+    <div class="card border-0 shadow-sm" style="border-radius:.75rem">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3">Добавить пользователя</h6>
+        <form method="post" action="/users/add">
+          <div class="input-group input-group-sm">
+            <input type="number" name="user_id" class="form-control"
+                   placeholder="Telegram User ID" required>
+            <button type="submit" class="btn btn-primary fw-semibold">
+              <i class="bi bi-person-plus me-1"></i>Добавить
+            </button>
+          </div>
+          <div class="form-text">Узнать ID можно у @userinfobot в Telegram.</div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Known chats -->
+    <div class="card border-0 shadow-sm" style="border-radius:.75rem">
+      <div class="card-body p-0">
+        <div class="px-4 pt-3 pb-2">
+          <h6 class="fw-semibold mb-0">Рабочие чаты</h6>
+          <small class="text-muted">{{ chats | length }} чат(-ов). Только просмотр.</small>
+        </div>
+        {% if chats %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead style="background:#f8f9fa">
+              <tr>
+                <th style="padding-left:1.25rem">Chat ID</th>
+                <th>Добавлен</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in chats %}
+              <tr>
+                <td style="padding-left:1.25rem"><code>{{ c.chat_id }}</code></td>
+                <td style="font-size:.8rem; color:#6c757d">{{ c.first_seen_at or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-chat-x" style="font-size:1.75rem; display:block; margin-bottom:.5rem"></i>
+          Чатов нет
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

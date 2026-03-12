@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд — ClaimArbiter Admin{% endblock %}
+{% block page_title %}Дашборд{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#fff3cd">
+          <i class="bi bi-hourglass-split text-warning"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ pending }}</div>
+          <div class="stat-label">Ожидают проверки</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#d1e7dd">
+          <i class="bi bi-check-circle text-success"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ approved }}</div>
+          <div class="stat-label">Согласовано</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#f8d7da">
+          <i class="bi bi-x-circle text-danger"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ rejected }}</div>
+          <div class="stat-label">Отклонено</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#cfe2ff">
+          <i class="bi bi-sliders text-primary"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ rules }}</div>
+          <div class="stat-label">Правил согласования</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#e2d9f3">
+          <i class="bi bi-person-fill text-purple" style="color:#6f42c1"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ users }}</div>
+          <div class="stat-label">Разрешённых пользователей</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-4">
+    <div class="card stat-card shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="stat-icon" style="background:#d3f3ee">
+          <i class="bi bi-chat-fill" style="color:#20c997"></i>
+        </div>
+        <div>
+          <div class="stat-value">{{ chats }}</div>
+          <div class="stat-label">Рабочих чатов</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Quick actions -->
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card shadow-sm border-0" style="border-radius:.75rem">
+      <div class="card-body">
+        <h6 class="card-title fw-semibold mb-3"><i class="bi bi-lightning-fill text-warning me-1"></i>Быстрые действия</h6>
+        <div class="d-flex flex-column gap-2">
+          <a href="/queue?status=pending" class="btn btn-sm btn-warning text-dark fw-semibold">
+            <i class="bi bi-list-check me-1"></i>Открыть очередь ({{ pending }} ожидает)
+          </a>
+          <a href="/rules" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-gear me-1"></i>Настроить правила согласования
+          </a>
+          <a href="/users" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-people me-1"></i>Управление пользователями
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card shadow-sm border-0" style="border-radius:.75rem">
+      <div class="card-body">
+        <h6 class="card-title fw-semibold mb-3"><i class="bi bi-info-circle text-info me-1"></i>О панели</h6>
+        <ul class="list-unstyled mb-0" style="font-size:.875rem; color:#495057">
+          <li class="mb-1"><i class="bi bi-check2 text-success me-1"></i>Согласование генерирует PDF и отправляет в чат</li>
+          <li class="mb-1"><i class="bi bi-check2 text-success me-1"></i>Отклонение уведомляет чат о причине</li>
+          <li class="mb-1"><i class="bi bi-check2 text-success me-1"></i>Правила задают маршрут: авто или ручной</li>
+          <li><i class="bi bi-check2 text-success me-1"></i>База SQLite синхронизирована с ботом</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

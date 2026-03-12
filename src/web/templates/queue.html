@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Очередь задач — ClaimArbiter Admin{% endblock %}
+{% block page_title %}Очередь задач{% endblock %}
+
+{% block content %}
+
+<!-- Filter tabs -->
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if status_filter == 'pending' %}active{% endif %}"
+       href="/queue?status=pending">
+      <i class="bi bi-hourglass-split text-warning me-1"></i>На проверке
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if status_filter == 'approved' %}active{% endif %}"
+       href="/queue?status=approved">
+      <i class="bi bi-check-circle text-success me-1"></i>Согласовано
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if status_filter == 'rejected' %}active{% endif %}"
+       href="/queue?status=rejected">
+      <i class="bi bi-x-circle text-danger me-1"></i>Отклонено
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if status_filter == 'all' %}active{% endif %}"
+       href="/queue?status=all">
+      <i class="bi bi-list-ul me-1"></i>Все
+    </a>
+  </li>
+</ul>
+
+<div class="card border-0 shadow-sm" style="border-radius:.75rem">
+  <div class="card-body p-0">
+    {% if tasks %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead style="background:#f8f9fa">
+          <tr>
+            <th style="width:4rem; padding-left:1.25rem">#</th>
+            <th>Тип задачи</th>
+            <th>Запросил</th>
+            <th>Чат ID</th>
+            <th>Статус</th>
+            <th>Создана</th>
+            <th style="width:3rem"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+          <tr>
+            <td style="padding-left:1.25rem; font-weight:600; color:#495057">{{ task.id }}</td>
+            <td>{{ task.task_type | human_task_type }}</td>
+            <td>{{ task.requester_name }}</td>
+            <td><code style="font-size:.8rem">{{ task.chat_id }}</code></td>
+            <td>
+              {% if task.status == 'pending' %}
+                <span class="badge badge-pending px-2 py-1">{{ task.status | status_ru }}</span>
+              {% elif task.status == 'approved' %}
+                <span class="badge badge-approved px-2 py-1">{{ task.status | status_ru }}</span>
+              {% else %}
+                <span class="badge badge-rejected px-2 py-1">{{ task.status | status_ru }}</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.8rem; color:#6c757d">{{ task.created_at }}</td>
+            <td>
+              <a href="/queue/{{ task.id }}" class="btn btn-sm btn-outline-secondary py-0 px-2">
+                <i class="bi bi-arrow-right"></i>
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-inbox" style="font-size:2.5rem; display:block; margin-bottom:.75rem"></i>
+      Задач нет
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

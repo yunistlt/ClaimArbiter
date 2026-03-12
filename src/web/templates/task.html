@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Задача #{{ task.id }} — ClaimArbiter Admin{% endblock %}
+{% block page_title %}Задача #{{ task.id }}{% endblock %}
+
+{% block content %}
+
+<!-- Success alerts -->
+{% if success == 'approved' %}
+<div class="alert alert-success flash d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-check-circle-fill"></i>
+  Документ согласован и отправлен в чат.
+</div>
+{% elif success == 'rejected' %}
+<div class="alert alert-info flash d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-info-circle-fill"></i>
+  Задача отклонена, чат уведомлён.
+</div>
+{% endif %}
+
+<div class="row g-3">
+
+  <!-- Meta card -->
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100" style="border-radius:.75rem">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.75rem; letter-spacing:.06em">Информация</h6>
+
+        <dl class="row mb-0" style="font-size:.875rem">
+          <dt class="col-5 text-muted fw-normal">ID задачи</dt>
+          <dd class="col-7 fw-semibold">#{{ task.id }}</dd>
+
+          <dt class="col-5 text-muted fw-normal">Тип</dt>
+          <dd class="col-7">{{ task.task_type | human_task_type }}</dd>
+
+          <dt class="col-5 text-muted fw-normal">Запросил</dt>
+          <dd class="col-7">{{ task.requester_name }}</dd>
+
+          <dt class="col-5 text-muted fw-normal">User ID</dt>
+          <dd class="col-7"><code>{{ task.requester_user_id }}</code></dd>
+
+          <dt class="col-5 text-muted fw-normal">Чат ID</dt>
+          <dd class="col-7"><code>{{ task.chat_id }}</code></dd>
+
+          <dt class="col-5 text-muted fw-normal">Статус</dt>
+          <dd class="col-7">
+            {% if task.status == 'pending' %}
+              <span class="badge badge-pending px-2 py-1">{{ task.status | status_ru }}</span>
+            {% elif task.status == 'approved' %}
+              <span class="badge badge-approved px-2 py-1">{{ task.status | status_ru }}</span>
+            {% else %}
+              <span class="badge badge-rejected px-2 py-1">{{ task.status | status_ru }}</span>
+            {% endif %}
+          </dd>
+
+          <dt class="col-5 text-muted fw-normal">Создана</dt>
+          <dd class="col-7" style="font-size:.8rem">{{ task.created_at }}</dd>
+
+          <dt class="col-5 text-muted fw-normal">Обновлена</dt>
+          <dd class="col-7" style="font-size:.8rem">{{ task.updated_at }}</dd>
+
+          {% if task.reviewer_id %}
+          <dt class="col-5 text-muted fw-normal">Ревьюер</dt>
+          <dd class="col-7"><code>{{ task.reviewer_id }}</code>{% if task.reviewer_id == -1 %} <span class="text-muted">(Веб)</span>{% endif %}</dd>
+          {% endif %}
+
+          {% if task.reviewer_comment %}
+          <dt class="col-5 text-muted fw-normal">Комментарий</dt>
+          <dd class="col-7 text-danger">{{ task.reviewer_comment }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+
+      <!-- Actions -->
+      {% if task.status == 'pending' %}
+      <div class="card-footer bg-transparent border-top" style="border-radius:0 0 .75rem .75rem">
+        <h6 class="fw-semibold mb-2 text-muted text-uppercase" style="font-size:.73rem; letter-spacing:.06em">Действия</h6>
+
+        <!-- Approve -->
+        <form method="post" action="/queue/{{ task.id }}/approve" class="mb-2"
+              onsubmit="return confirm('Согласовать задачу #{{ task.id }} и отправить документ в чат?')">
+          <button type="submit" class="btn btn-success btn-sm w-100 fw-semibold">
+            <i class="bi bi-check-lg me-1"></i>Согласовать и отправить в чат
+          </button>
+        </form>
+
+        <!-- Reject -->
+        <button class="btn btn-outline-danger btn-sm w-100 fw-semibold"
+                data-bs-toggle="collapse" data-bs-target="#rejectForm">
+          <i class="bi bi-x-lg me-1"></i>Отклонить
+        </button>
+
+        <div class="collapse mt-2" id="rejectForm">
+          <form method="post" action="/queue/{{ task.id }}/reject">
+            <textarea name="comment" class="form-control form-control-sm mb-2"
+                      rows="3" placeholder="Укажите причину отклонения..." required></textarea>
+            <button type="submit" class="btn btn-danger btn-sm w-100">
+              Подтвердить отклонение
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Content card -->
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm h-100" style="border-radius:.75rem">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.75rem; letter-spacing:.06em">
+          Содержимое документа
+        </h6>
+        <div class="content-box">{{ task.content }}</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="mt-3">
+  <a href="/queue" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Назад к очереди
+  </a>
+</div>
+
+{% endblock %}
