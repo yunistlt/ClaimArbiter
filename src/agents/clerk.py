@@ -45,7 +45,7 @@ class ClerkAgent(BaseAgent):
                           f"{shared_company_block}"
                           "Your job is to draft a perfect formal response letter based on internal analysis. "
                           "Unless specified otherwise, use the primary company relevant to the context. "
-                          "Use strictly formal Russian business style (high bureaucratic standard). "
+                          "Use official Russian business style that is clear and readable, without excessive bureaucracy. "
                           "Synthesize the Technical Verdict and Legal Strategy into one document.")
             user_msg = ("Technical Verdict: {technical}\n"
                         "Legal Strategy: {legal}\n\n"
@@ -64,7 +64,7 @@ class ClerkAgent(BaseAgent):
                           "based on the instructions provided by the Head of Legal (Elena). "
                           "Identify which of our companies is the Sender/Claimant from the legal instructions. "
                           "If not specified, assume the user will fill it in, but prefer using available details if context implies one. "
-                          "Use strictly formal Russian business/legal style. "
+                          "Use official Russian business/legal style that is concise and readable. "
                           "Ensure all standard clauses (Force Majeure, Dispute Resolution) are implied or included if relevant.")
             user_msg = ("Task Description: {description}\n"
                         "Legal Instructions / Strategy: {legal}\n\n"

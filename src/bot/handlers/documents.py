@@ -16,10 +16,12 @@ from bot.filters import IsAllowedUser
 from aiogram.filters import Command
 from config import LAWYER_REVIEWER_IDS
 import asyncio
+import json
 import os
 import tempfile
 import logging
 import re
+from html import escape
 
 router = Router()
 secretary = SecretaryAgent()
@@ -250,8 +252,40 @@ def _extract_tag_block(text: str, tag: str) -> str:
     return match.group(1).strip()
 
 
+def _extract_internal_state_json(text: str) -> dict:
+    pattern = r"<internal_state>(.*?)</internal_state>"
+    match = re.search(pattern, text or "", flags=re.S)
+    if not match:
+        return {}
+
+    raw_json = (match.group(1) or "").strip()
+    try:
+        parsed = json.loads(raw_json)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return {}
+    return {}
+
+
+def _strip_internal_state_block(text: str) -> str:
+    cleaned = re.sub(r"<internal_state>.*?</internal_state>", "", text or "", flags=re.S)
+    return cleaned.strip()
+
+
 def update_consultation_state_from_strategy(card: IncidentCard) -> None:
     strategy = card.legal_strategy or ""
+    internal_state = _extract_internal_state_json(strategy)
+
+    # Preferred format: hidden JSON state block.
+    card.current_stage = (internal_state.get("stage") or "").strip() or card.current_stage
+    card.known_facts = (internal_state.get("known") or "").strip() or card.known_facts
+    card.missing_info = (internal_state.get("missing") or "").strip() or card.missing_info
+    card.next_step = (internal_state.get("next_step") or "").strip() or card.next_step
+    card.eta_text = (internal_state.get("eta") or "").strip() or card.eta_text
+    card.key_risks = (internal_state.get("risks") or "").strip() or card.key_risks
+
+    # Backward-compatible fallback for older tagged outputs.
     card.current_stage = _extract_tag_block(strategy, "STAGE") or card.current_stage
     card.known_facts = _extract_tag_block(strategy, "KNOWN") or card.known_facts
     card.missing_info = _extract_tag_block(strategy, "MISSING") or card.missing_info
@@ -261,14 +295,25 @@ def update_consultation_state_from_strategy(card: IncidentCard) -> None:
 
 
 def build_consultation_response(card: IncidentCard) -> str:
-    lines = ["✅ <b>Статус юридической работы</b>"]
-    lines.append(f"<b>Этап:</b> {card.current_stage or 'первичный анализ'}")
-    lines.append(f"<b>Что уже известно:</b> {card.known_facts or 'данные собираются'}")
-    lines.append(f"<b>Чего не хватает:</b> {card.missing_info or 'критичных пробелов не выявлено'}")
-    lines.append(f"<b>Следующий шаг:</b> {card.next_step or 'уточнить факты и подготовить позицию'}")
-    lines.append(f"<b>Срок:</b> {card.eta_text or 'уточняется после проверки документов'}")
-    lines.append(f"<b>Ключевые риски:</b> {card.key_risks or 'на текущем этапе существенные риски не подтверждены'}")
-    lines.append("\nДля официального документа напишите: <b>«подготовь официальный ответ/письмо»</b>.")
+    public_text = _strip_internal_state_block(card.legal_strategy or "")
+
+    # Legacy guard: if model returned old tag-only format, use concise fallback text.
+    if not public_text or re.search(r"\[[A-Z_]+\]", public_text):
+        public_text = "Принято. Провожу правовой анализ и подготовлю следующий шаг."
+
+    lines = [escape(public_text)]
+
+    if card.next_step:
+        lines.append(f"\n<b>Следующий шаг:</b> {escape(card.next_step)}")
+
+    if card.missing_info:
+        lowered = card.missing_info.lower()
+        if all(marker not in lowered for marker in ["не хватает", "нет", "уточн", "нужн"]):
+            pass
+        else:
+            lines.append(f"<b>Нужно от вас:</b> {escape(card.missing_info)}")
+
+    lines.append("\nЕсли нужна конкретика, напишите: <b>«раскрой подробнее»</b>.")
     return "\n".join(lines)
 
 async def chat_with_llm(message: types.Message):
@@ -323,7 +368,8 @@ async def chat_with_llm(message: types.Message):
                    "   - `consultation`: если нужно обсудить кейс, собрать данные, понять позицию или дать рекомендации без формального документа.\n"
                    "   - `legal_advice`: если нужен развернутый юридический разбор, но без обязательного выпуска документа.\n"
                    "5. Не используй шаблонные фразы вроде 'мы всегда готовы помочь' без фактического содержания.\n"
-                   "6. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"),
+                   "6. По умолчанию отвечай коротко: 1-3 абзаца, без лишней формализации.\n"
+                   "7. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"),
         ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
     

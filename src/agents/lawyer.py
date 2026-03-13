@@ -46,14 +46,14 @@ class LawyerAgent(BaseAgent):
                           "You are sharp, strategic, and protective of the company's interests. "
                           "Based on the technical verdict from Boris, formulate a legal strategy for consultation first. "
                           "Do NOT draft a formal letter here. "
-                          "Always return answer in Russian and STRICTLY in this format with tags: "
-                          "[STAGE], [KNOWN], [MISSING], [NEXT_STEP], [ETA], [RISKS]. "
-                          "Each tag must be present exactly once. "
-                          "Use concise business phrasing, no generic pleasantries. "
+                                                    "Return answer in Russian. Keep the public answer short and practical (2-4 short sentences), no generic pleasantries. "
+                                                    "After the public answer, add internal machine block exactly once in this form: "
+                                                    "<internal_state>{\"stage\":\"...\",\"known\":\"...\",\"missing\":\"...\",\"next_step\":\"...\",\"eta\":\"...\",\"risks\":\"...\"}</internal_state>. "
+                                                    "The internal block is for system state only. "
                           "Reference relevant articles of the Russian Civil Code (ГК РФ) where applicable "
                           "(e.g., Article 475, 476, 513). Be professional and precise.")
             user_msg = ("Technical Engineer's Verdict:\n{verdict}\n\n"
-                        "Develop internal consultation strategy in tagged format.")
+                                                "Provide concise consultation result with internal state block.")
             input_vars = {
                 "verdict": card.technical_verdict or "No technical verdict provided.",
                 "companies_data": self.companies_data,
@@ -69,11 +69,12 @@ class LawyerAgent(BaseAgent):
                           "IMPORTANT: If the user has NOT specified which of your companies is the sender, and you have multiple options, "
                           "your strategy must be to ASK the user to clarify this (e.g., 'Which company is the sender?'). "
                                                     "Reference relevant Russian laws (GK RF, TK RF, etc.). "
-                                                    "For consultation and legal advice tasks, return answer in Russian and STRICTLY in tagged format: "
-                                                    "[STAGE], [KNOWN], [MISSING], [NEXT_STEP], [ETA], [RISKS]. "
-                                                    "Use concise business style, no generic courtesy text.")
+                                                    "For consultation and legal advice tasks, return answer in Russian and keep it short by default (2-4 short sentences). "
+                                                    "Then add internal machine block exactly once in this form: "
+                                                    "<internal_state>{\"stage\":\"...\",\"known\":\"...\",\"missing\":\"...\",\"next_step\":\"...\",\"eta\":\"...\",\"risks\":\"...\"}</internal_state>. "
+                                                    "Use concise business style.")
             user_msg = ("User Request / Task Description:\n{description}\n\n"
-                                                "Provide legal strategy in tagged format.")
+                                                "Provide legal strategy with concise public answer and internal state block.")
             input_vars = {
                 "description": card.task_description or "No description provided.",
                 "companies_data": self.companies_data,
