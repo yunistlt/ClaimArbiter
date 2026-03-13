@@ -14,11 +14,12 @@ import secrets
 import sqlite3
 import tempfile
 import logging
+from io import BytesIO
 from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request, Depends, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -158,6 +159,97 @@ def mode_ru(value: str) -> str:
 templates.env.filters["human_task_type"] = human_task_type
 templates.env.filters["status_ru"] = status_ru
 templates.env.filters["mode_ru"] = mode_ru
+
+
+def _ensure_user_profiles_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id INTEGER PRIMARY KEY,
+            full_name TEXT,
+            role TEXT NOT NULL DEFAULT 'employee',
+            department TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    existing_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()
+    }
+    for column_name in ("username", "telegram_full_name", "avatar_file_id"):
+        if column_name not in existing_columns:
+            conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {column_name} TEXT")
+
+
+async def _telegram_api_get(method: str, params: dict) -> Optional[dict]:
+    if not BOT_TOKEN:
+        return None
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params=params)
+        if resp.status_code != 200:
+            logger.warning("Telegram %s failed: %s %s", method, resp.status_code, resp.text)
+            return None
+        payload = resp.json()
+        if not payload.get("ok"):
+            logger.warning("Telegram %s returned error: %s", method, payload)
+            return None
+        return payload.get("result")
+    except Exception:
+        logger.exception("Telegram %s request failed", method)
+        return None
+
+
+async def _fetch_telegram_profile(user_id: int) -> dict:
+    profile: dict = {}
+
+    chat = await _telegram_api_get("getChat", {"chat_id": str(user_id)})
+    if chat:
+        first_name = (chat.get("first_name") or "").strip()
+        last_name = (chat.get("last_name") or "").strip()
+        full_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
+        profile["username"] = chat.get("username")
+        profile["telegram_full_name"] = full_name
+
+    photos = await _telegram_api_get(
+        "getUserProfilePhotos", {"user_id": str(user_id), "limit": 1}
+    )
+    if photos and photos.get("total_count", 0) > 0:
+        first_photo_group = photos.get("photos", [[]])[0]
+        if first_photo_group:
+            # The last size is usually the largest one.
+            profile["avatar_file_id"] = first_photo_group[-1].get("file_id")
+
+    return profile
+
+
+async def _upsert_telegram_profile(conn: sqlite3.Connection, user_id: int) -> dict:
+    telegram_profile = await _fetch_telegram_profile(user_id)
+    if not telegram_profile:
+        return {}
+
+    conn.execute(
+        """
+        INSERT INTO user_profiles(user_id, username, telegram_full_name, avatar_file_id)
+        VALUES(?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            username = COALESCE(excluded.username, user_profiles.username),
+            telegram_full_name = COALESCE(excluded.telegram_full_name, user_profiles.telegram_full_name),
+            avatar_file_id = COALESCE(excluded.avatar_file_id, user_profiles.avatar_file_id),
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            user_id,
+            telegram_profile.get("username"),
+            telegram_profile.get("telegram_full_name"),
+            telegram_profile.get("avatar_file_id"),
+        ),
+    )
+    return telegram_profile
 
 # ---------------------------------------------------------------------------
 # Helper: send document to Telegram after web approval
@@ -471,17 +563,32 @@ async def users_list(
 ) -> HTMLResponse:
     try:
         with access_conn() as conn:
-            conn.execute(
+            _ensure_user_profiles_schema(conn)
+            base_rows = conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS user_profiles (
-                    user_id INTEGER PRIMARY KEY,
-                    full_name TEXT,
-                    role TEXT NOT NULL DEFAULT 'employee',
-                    department TEXT,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
+                SELECT
+                    au.user_id,
+                    au.first_seen_at,
+                    up.full_name,
+                    COALESCE(up.role, 'employee') AS role,
+                    up.department,
+                    up.username,
+                    up.telegram_full_name,
+                    up.avatar_file_id
+                FROM allowed_users au
+                LEFT JOIN user_profiles up ON up.user_id = au.user_id
+                ORDER BY au.first_seen_at DESC
                 """
-            )
+            ).fetchall()
+
+            for row in base_rows:
+                user_id = int(row[0])
+                has_username = bool(row[5])
+                has_telegram_name = bool(row[6])
+                has_avatar = bool(row[7])
+                if not (has_username and has_telegram_name and has_avatar):
+                    await _upsert_telegram_profile(conn, user_id)
+
             user_rows = conn.execute(
                 """
                 SELECT
@@ -489,7 +596,10 @@ async def users_list(
                     au.first_seen_at,
                     up.full_name,
                     COALESCE(up.role, 'employee') AS role,
-                    up.department
+                    up.department,
+                    up.username,
+                    up.telegram_full_name,
+                    up.avatar_file_id
                 FROM allowed_users au
                 LEFT JOIN user_profiles up ON up.user_id = au.user_id
                 ORDER BY au.first_seen_at DESC
@@ -498,6 +608,7 @@ async def users_list(
             chat_rows = conn.execute(
                 "SELECT chat_id, first_seen_at FROM allowed_chats ORDER BY first_seen_at DESC"
             ).fetchall()
+            conn.commit()
     except Exception:
         user_rows, chat_rows = [], []
 
@@ -508,6 +619,9 @@ async def users_list(
             "full_name": r[2],
             "role": r[3] or "employee",
             "department": r[4],
+            "username": r[5],
+            "telegram_full_name": r[6],
+            "avatar_file_id": r[7],
         }
         for r in user_rows
     ]
@@ -531,17 +645,7 @@ async def remove_user(
     _user: str = Depends(check_auth),
 ) -> RedirectResponse:
     with access_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_profiles (
-                user_id INTEGER PRIMARY KEY,
-                full_name TEXT,
-                role TEXT NOT NULL DEFAULT 'employee',
-                department TEXT,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        _ensure_user_profiles_schema(conn)
         conn.execute("DELETE FROM allowed_users WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM user_profiles WHERE user_id=?", (user_id,))
         conn.commit()
@@ -561,26 +665,33 @@ async def add_user(
         raise HTTPException(status_code=422, detail="Некорректная роль")
 
     with access_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_profiles (
-                user_id INTEGER PRIMARY KEY,
-                full_name TEXT,
-                role TEXT NOT NULL DEFAULT 'employee',
-                department TEXT,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        _ensure_user_profiles_schema(conn)
         conn.execute(
             "INSERT OR IGNORE INTO allowed_users(user_id) VALUES(?)", (user_id,)
         )
+
+        telegram_profile = await _upsert_telegram_profile(conn, user_id)
+        effective_full_name = (full_name or "").strip() or telegram_profile.get("telegram_full_name")
+
         conn.execute(
-            "INSERT INTO user_profiles(user_id, full_name, role, department) VALUES(?, ?, ?, ?) "
+            "INSERT INTO user_profiles(user_id, full_name, role, department, username, telegram_full_name, avatar_file_id) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET "
-            "full_name=excluded.full_name, role=excluded.role, department=excluded.department, "
+            "full_name=COALESCE(excluded.full_name, user_profiles.full_name), "
+            "role=excluded.role, department=excluded.department, "
+            "username=COALESCE(excluded.username, user_profiles.username), "
+            "telegram_full_name=COALESCE(excluded.telegram_full_name, user_profiles.telegram_full_name), "
+            "avatar_file_id=COALESCE(excluded.avatar_file_id, user_profiles.avatar_file_id), "
             "updated_at=CURRENT_TIMESTAMP",
-            (user_id, (full_name or "").strip() or None, role, (department or "").strip() or None),
+            (
+                user_id,
+                effective_full_name or None,
+                role,
+                (department or "").strip() or None,
+                telegram_profile.get("username"),
+                telegram_profile.get("telegram_full_name"),
+                telegram_profile.get("avatar_file_id"),
+            ),
         )
         conn.commit()
     return RedirectResponse(url="/users?success=added", status_code=303)
@@ -599,17 +710,7 @@ async def save_user_profile(
         raise HTTPException(status_code=422, detail="Некорректная роль")
 
     with access_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_profiles (
-                user_id INTEGER PRIMARY KEY,
-                full_name TEXT,
-                role TEXT NOT NULL DEFAULT 'employee',
-                department TEXT,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        _ensure_user_profiles_schema(conn)
         conn.execute("INSERT OR IGNORE INTO allowed_users(user_id) VALUES(?)", (user_id,))
         conn.execute(
             "INSERT INTO user_profiles(user_id, full_name, role, department) VALUES(?, ?, ?, ?) "
@@ -621,3 +722,39 @@ async def save_user_profile(
         conn.commit()
 
     return RedirectResponse(url="/users?success=saved", status_code=303)
+
+
+@app.get("/users/avatar/{user_id}")
+async def user_avatar(user_id: int, _user: str = Depends(check_auth)) -> Response:
+    if not BOT_TOKEN:
+        return Response(status_code=404)
+
+    with access_conn() as conn:
+        _ensure_user_profiles_schema(conn)
+        row = conn.execute(
+            "SELECT avatar_file_id FROM user_profiles WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+
+    avatar_file_id = (row[0] if row else None) or None
+    if not avatar_file_id:
+        return Response(status_code=404)
+
+    tg_file = await _telegram_api_get("getFile", {"file_id": avatar_file_id})
+    file_path = tg_file.get("file_path") if tg_file else None
+    if not file_path:
+        return Response(status_code=404)
+
+    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            image_resp = await client.get(file_url)
+        if image_resp.status_code != 200:
+            return Response(status_code=404)
+        return StreamingResponse(
+            BytesIO(image_resp.content),
+            media_type=image_resp.headers.get("content-type", "image/jpeg"),
+        )
+    except Exception:
+        logger.exception("Error loading avatar for user_id=%s", user_id)
+        return Response(status_code=404)

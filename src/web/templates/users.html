@@ -37,6 +37,7 @@
             <thead style="background:#f8f9fa">
               <tr>
                 <th style="padding-left:1.25rem">Идентификатор пользователя (Телеграм)</th>
+                <th>Профиль Telegram</th>
                 <th>ФИО</th>
                 <th>Роль</th>
                 <th>Отдел</th>
@@ -48,7 +49,24 @@
               {% for u in users %}
               <tr>
                 <td style="padding-left:1.25rem">
-                  <code>{{ u.user_id }}</code>
+                  <div class="d-flex align-items-center gap-2">
+                    {% if u.avatar_file_id %}
+                    <img src="/users/avatar/{{ u.user_id }}" alt="avatar" width="28" height="28"
+                         style="border-radius:999px; object-fit:cover; border:1px solid #dee2e6; background:#f8f9fa;">
+                    {% else %}
+                    <div class="d-flex align-items-center justify-content-center"
+                         style="width:28px; height:28px; border-radius:999px; border:1px solid #dee2e6; background:#f8f9fa; color:#6c757d; font-size:.75rem;">
+                      <i class="bi bi-person"></i>
+                    </div>
+                    {% endif %}
+                    <code>{{ u.user_id }}</code>
+                  </div>
+                </td>
+                <td>
+                  <div class="small fw-semibold">{{ u.telegram_full_name or '—' }}</div>
+                  <div class="small text-muted">
+                    {% if u.username %}@{{ u.username }}{% else %}—{% endif %}
+                  </div>
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm" name="full_name"
