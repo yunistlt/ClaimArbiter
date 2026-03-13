@@ -813,15 +813,14 @@ async def handle_text_message(message: types.Message):
          card = IncidentManager.get_or_create_incident(context_chat_id)
          
          # Guess task type if not set
-         if not card.task_type or card.task_type == "claim": # default "claim" might be old value
-              # If user asks for general letter, maybe switch to document_drafting?
-              # For safety, let the LLM handle it via chat_with_llm if possible, OR default to claim.
-              # Let's default to claim_processing for backward compatibility unless LLM intervenes.
-              if "договор" in text or "иск" in text:
-                  card.task_type = "document_drafting"
-                  card.task_description = text
-              else:
+         if not card.task_type or card.task_type == "claim":
+              if any(marker in text for marker in ["брак", "дефект", "рекламац", "претензи"]):
                   card.task_type = "claim_processing"
+              elif any(marker in text for marker in ["договор", "письмо", "иск", "протокол разноглас"]):
+                  card.task_type = "document_drafting"
+              else:
+                  card.task_type = "consultation"
+              card.task_description = text
                   
          await message.answer("🔄 Принято. Начинаю формирование документа...")
          await run_delegated_task(message, card, generate_document=True)

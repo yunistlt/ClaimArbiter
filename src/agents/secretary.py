@@ -10,8 +10,8 @@ class SecretaryAgent(BaseAgent):
     """
     Агент «Секретарь» (Анна):
     - Распознает текст (OCR) со сканов УПД, актов и договоров.
-    - Формирует «карточку инцидента» (даты, номера, реквизиты сторон).
-    - Блокирует процесс, если в чате отсутствуют обязательные документы (например, Акт ТОРГ-2).
+    - Формирует карточку юридического кейса (даты, номера, реквизиты сторон).
+    - Проверяет комплектность только там, где это действительно нужно (например, по дефектам/рекламациям).
     """
 
     def __init__(self):
@@ -58,8 +58,10 @@ class SecretaryAgent(BaseAgent):
             card.task_type = "document_drafting"
             if not card.task_description:
                 card.task_description = text or f"Согласование договора: {doc_info.file_name}"
-        elif any(marker in context for marker in claim_markers) and card.task_type in ["claim", "claim_processing"]:
+        elif any(marker in context for marker in claim_markers):
             card.task_type = "claim_processing"
+            if not card.task_description:
+                card.task_description = text or f"Претензионная работа: {doc_info.file_name}"
 
         card.required_documents = self.get_required_documents(card)
 
@@ -67,8 +69,12 @@ class SecretaryAgent(BaseAgent):
         """
         Returns context-aware list of required documents.
         """
-        if card.task_type in ["document_drafting", "legal_advice", "consultation"]:
-            # Для согласования договоров не требуем складские документы.
+        if card.task_type in ["consultation", "legal_advice"]:
+            # Для консультаций и общего анализа обязательный комплект не блокирует работу.
+            return []
+
+        if card.task_type == "document_drafting":
+            # Для договорной работы желательно иметь проект договора, но без жесткой блокировки.
             return ["Договор"]
 
         # Default flow for claims/defects.

@@ -78,14 +78,14 @@ async def command_start_handler(message: types.Message) -> None:
     This handler receives messages with `/start` command from allowed users
     """
     await message.answer(f"Привет, {message.from_user.full_name}! Я бот 'ЗМК-Юрист'.\n"
-                         f"Я помогу с разбором рекламаций. Напиши /status для проверки текущей ситуации или /help для справки.")
+                         f"Я помогаю по всем рабочим юридическим вопросам компании. Напиши /status для проверки текущей ситуации или /help для справки.")
 
 @router.message(Command("status"), IsAllowedUser())
 async def command_status_handler(message: types.Message) -> None:
     """
     Handler for /status command
     """
-    await message.answer("Статус: Ожидание документов.\n(Заглушка для проверки работы)")
+    await message.answer("Статус: Готов к обработке юридической задачи.\n(Заглушка для проверки работы)")
 
 @router.message(Command("help"), IsAllowedUser())
 async def command_help_handler(message: types.Message) -> None:

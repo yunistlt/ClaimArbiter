@@ -66,7 +66,7 @@ class ReviewQueue:
             )
             conn.commit()
 
-        # Conservative defaults: drafts/claims go through review, consultations auto-release.
+        # Conservative defaults: formal outputs go through review, consultations auto-release.
         for task_type, mode in [
             ("claim_processing", "manual"),
             ("claim", "manual"),

@@ -17,7 +17,7 @@ class ChatMessage(BaseModel):
 
 class IncidentCard(BaseModel):
     """
-    Карточка инцидента. Хранит все данные по текущей рекламации в чате.
+    Карточка юридического кейса. Хранит данные по рабочей задаче в чате.
     """
     chat_id: int
     status: str = "init"  # init, collecting_evidence, analyzing, drafting, done
@@ -31,7 +31,7 @@ class IncidentCard(BaseModel):
     buyer_name: Optional[str] = None
     
     # Documents
-    required_documents: List[str] = Field(default_factory=lambda: ["TORG-12", "Act-TORG-2", "Contract", "Photos"])
+    required_documents: List[str] = Field(default_factory=list)
     uploaded_documents: List[DocumentInfo] = Field(default_factory=list)
     
     # Analysis
