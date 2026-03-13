@@ -13,8 +13,6 @@ from services.review_queue import ReviewQueue
 from services.access_control import AccessControl
 from aiogram.types import FSInputFile
 from bot.filters import IsAllowedUser
-from aiogram.filters import Command
-from config import LAWYER_REVIEWER_IDS
 import asyncio
 import json
 import os
@@ -61,10 +59,6 @@ def human_task_type(task_type: str) -> str:
         "consultation": "юридическая консультация",
     }
     return mapping.get(task_type, "юридическая задача")
-
-
-def is_reviewer(user_id: int) -> bool:
-    return user_id in LAWYER_REVIEWER_IDS
 
 
 def role_response_style(role: str) -> str:
@@ -558,22 +552,8 @@ async def run_delegated_task(message: types.Message, card: IncidentCard, generat
             )
 
             await message.answer(
-                f"🕒 Документ поставлен в очередь согласования юристом. Номер: <b>#{task_id}</b>."
+                f"🕒 Документ поставлен в очередь согласования в веб-панели. Номер: <b>#{task_id}</b>."
             )
-
-            reviewer_text = (
-                f"📥 <b>Новая задача на проверку</b>\n"
-                f"ID: <b>#{task_id}</b>\n"
-                f"Тип: {human_task_type(card.task_type)}\n"
-                f"От: {message.from_user.full_name}\n\n"
-                f"Для выпуска: /review_approve {task_id}\n"
-                f"Для отклонения: /review_reject {task_id} причина"
-            )
-            for reviewer_id in LAWYER_REVIEWER_IDS:
-                try:
-                    await message.bot.send_message(reviewer_id, reviewer_text)
-                except Exception as e:
-                    logger.warning(f"Could not notify reviewer {reviewer_id}: {e}")
             return
 
         sent = await send_pdf_to_chat(
@@ -588,123 +568,6 @@ async def run_delegated_task(message: types.Message, card: IncidentCard, generat
         await message.answer("⚠️ Документ не был сформирован полностью. Проверьте формулировку запроса и повторите запуск.")
 
 
-@router.message(Command("review_rules"), IsAllowedUser())
-async def review_rules_handler(message: types.Message):
-    if not is_reviewer(message.from_user.id):
-        return
-
-    rules = review_queue.list_rules()
-    if not rules:
-        await message.answer("Правила согласования пока не настроены.")
-        return
-
-    lines = ["⚙️ <b>Правила согласования</b>"]
-    for task_type, mode in rules:
-        mode_ru = "ручная проверка" if mode == "manual" else "автовыпуск"
-        lines.append(f"• {human_task_type(task_type)}: {mode_ru}")
-    lines.append("\nИзменить: /review_set <task_type> <auto|manual>")
-    await message.answer("\n".join(lines))
-
-
-@router.message(Command("review_set"), IsAllowedUser())
-async def review_set_handler(message: types.Message):
-    if not is_reviewer(message.from_user.id):
-        return
-
-    parts = (message.text or "").split()
-    if len(parts) != 3:
-        await message.answer("Формат: /review_set <task_type> <auto|manual>")
-        return
-
-    task_type = parts[1].strip()
-    mode = parts[2].strip().lower()
-    if mode not in ["auto", "manual"]:
-        await message.answer("Режим может быть только auto или manual.")
-        return
-
-    review_queue.set_rule(task_type, mode)
-    mode_ru = "ручная проверка" if mode == "manual" else "автовыпуск"
-    await message.answer(f"Обновлено: {human_task_type(task_type)} -> {mode_ru}")
-
-
-@router.message(Command("review_queue"), IsAllowedUser())
-async def review_queue_handler(message: types.Message):
-    if not is_reviewer(message.from_user.id):
-        return
-
-    tasks = review_queue.list_pending(limit=20)
-    if not tasks:
-        await message.answer("Очередь согласования пуста.")
-        return
-
-    lines = ["📋 <b>Очередь согласования</b>"]
-    for task in tasks:
-        lines.append(
-            f"• #{task.id} | {human_task_type(task.task_type)} | чат {task.chat_id} | {task.requester_name}"
-        )
-    await message.answer("\n".join(lines))
-
-
-@router.message(Command("review_approve"), IsAllowedUser())
-async def review_approve_handler(message: types.Message):
-    if not is_reviewer(message.from_user.id):
-        return
-
-    parts = (message.text or "").split()
-    if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Формат: /review_approve <id>")
-        return
-
-    task_id = int(parts[1])
-    task = review_queue.get_task(task_id)
-    if not task or task.status != "pending":
-        await message.answer("Задача не найдена или уже обработана.")
-        return
-
-    review_queue.approve(task_id, message.from_user.id)
-
-    sent = await send_pdf_to_chat(
-        message=message,
-        chat_id=task.chat_id,
-        text=task.content,
-        caption_prefix="Подготовлен юридическим департаментом и согласован юристом.",
-    )
-    if sent:
-        await message.answer(f"✅ Задача #{task_id} согласована и отправлена в чат {task.chat_id}.")
-    else:
-        await message.answer(f"⚠️ Задача #{task_id} согласована, но отправка PDF не удалась.")
-
-
-@router.message(Command("review_reject"), IsAllowedUser())
-async def review_reject_handler(message: types.Message):
-    if not is_reviewer(message.from_user.id):
-        return
-
-    parts = (message.text or "").split(maxsplit=2)
-    if len(parts) < 3 or not parts[1].isdigit():
-        await message.answer("Формат: /review_reject <id> <причина>")
-        return
-
-    task_id = int(parts[1])
-    reason = parts[2].strip()
-
-    task = review_queue.get_task(task_id)
-    if not task or task.status != "pending":
-        await message.answer("Задача не найдена или уже обработана.")
-        return
-
-    review_queue.reject(task_id, message.from_user.id, reason)
-
-    try:
-        await message.bot.send_message(
-            task.chat_id,
-            f"❌ Документ по задаче #{task_id} отклонен юристом. Причина: {reason}",
-        )
-    except Exception as e:
-        logger.warning(f"Could not notify source chat {task.chat_id}: {e}")
-
-    await message.answer(f"✅ Задача #{task_id} отклонена.")
-    
 @router.message(F.document | F.photo, IsAllowedUser())
 async def handle_document_upload(message: types.Message):
     """

@@ -9,6 +9,10 @@
 <div class="alert alert-success flash d-flex align-items-center gap-2 mb-3">
   <i class="bi bi-check-circle-fill"></i>Пользователь добавлен.
 </div>
+{% elif success == 'saved' %}
+<div class="alert alert-success flash d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-check-circle-fill"></i>Профиль сотрудника сохранён.
+</div>
 {% elif success == 'removed' %}
 <div class="alert alert-warning flash d-flex align-items-center gap-2 mb-3">
   <i class="bi bi-exclamation-triangle-fill"></i>Пользователь удалён из разрешённых.
@@ -24,7 +28,7 @@
         <div class="px-4 pt-3 pb-2 d-flex align-items-start justify-content-between">
           <div>
             <h6 class="fw-semibold mb-0">Разрешённые пользователи</h6>
-            <small class="text-muted">{{ users | length }} пользователь(-ей)</small>
+            <small class="text-muted">{{ users | length }} сотрудник(-ов)</small>
           </div>
         </div>
         {% if users %}
@@ -33,8 +37,11 @@
             <thead style="background:#f8f9fa">
               <tr>
                 <th style="padding-left:1.25rem">Telegram User ID</th>
+                <th>ФИО</th>
+                <th>Роль</th>
+                <th>Отдел</th>
                 <th>Добавлен</th>
-                <th style="width:4rem"></th>
+                <th style="width:11rem"></th>
               </tr>
             </thead>
             <tbody>
@@ -43,12 +50,33 @@
                 <td style="padding-left:1.25rem">
                   <code>{{ u.user_id }}</code>
                 </td>
-                <td style="font-size:.8rem; color:#6c757d">{{ u.first_seen_at or '—' }}</td>
                 <td>
+                    <input type="text" class="form-control form-control-sm" name="full_name"
+                           value="{{ u.full_name or '' }}" placeholder="ФИО" form="profile-{{ u.user_id }}">
+                </td>
+                <td>
+                    <select class="form-select form-select-sm" name="role" form="profile-{{ u.user_id }}">
+                      {% for role in role_choices %}
+                      <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role }}</option>
+                      {% endfor %}
+                    </select>
+                </td>
+                <td>
+                    <input type="text" class="form-control form-control-sm" name="department"
+                           value="{{ u.department or '' }}" placeholder="Отдел" form="profile-{{ u.user_id }}">
+                </td>
+                <td style="font-size:.8rem; color:#6c757d">{{ u.first_seen_at or '—' }}</td>
+                <td class="d-flex gap-2">
+                  <form id="profile-{{ u.user_id }}" method="post" action="/users/save_profile">
+                    <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2" title="Сохранить профиль">
+                      <i class="bi bi-save"></i>
+                    </button>
+                  </form>
                   <form method="post" action="/users/remove"
                         onsubmit="return confirm('Удалить пользователя {{ u.user_id }} из разрешённых?')">
                     <input type="hidden" name="user_id" value="{{ u.user_id }}">
-                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">
+                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2" title="Удалить пользователя">
                       <i class="bi bi-trash"></i>
                     </button>
                   </form>
@@ -74,16 +102,31 @@
     <!-- Add user -->
     <div class="card border-0 shadow-sm" style="border-radius:.75rem">
       <div class="card-body">
-        <h6 class="fw-semibold mb-3">Добавить пользователя</h6>
+        <h6 class="fw-semibold mb-3">Добавить сотрудника</h6>
         <form method="post" action="/users/add">
-          <div class="input-group input-group-sm">
-            <input type="number" name="user_id" class="form-control"
+          <div class="mb-2">
+            <input type="number" name="user_id" class="form-control form-control-sm"
                    placeholder="Telegram User ID" required>
-            <button type="submit" class="btn btn-primary fw-semibold">
-              <i class="bi bi-person-plus me-1"></i>Добавить
-            </button>
           </div>
-          <div class="form-text">Узнать ID можно у @userinfobot в Telegram.</div>
+          <div class="mb-2">
+            <input type="text" name="full_name" class="form-control form-control-sm"
+                   placeholder="ФИО (опционально)">
+          </div>
+          <div class="mb-2">
+            <select class="form-select form-select-sm" name="role">
+              {% for role in role_choices %}
+              <option value="{{ role }}" {% if role == 'employee' %}selected{% endif %}>{{ role }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <input type="text" name="department" class="form-control form-control-sm"
+                   placeholder="Отдел (опционально)">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+            <i class="bi bi-person-plus me-1"></i>Добавить
+          </button>
+          <div class="form-text">ID можно узнать у @userinfobot в Telegram.</div>
         </form>
       </div>
     </div>

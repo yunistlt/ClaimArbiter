@@ -120,6 +120,17 @@ MODE_RU = {
     "auto": "Автовыпуск",
 }
 
+ROLE_CHOICES = [
+    "ceo",
+    "head_of_legal",
+    "lawyer",
+    "sales",
+    "procurement",
+    "warehouse",
+    "accountant",
+    "employee",
+]
+
 
 def human_task_type(value: str) -> str:
     return TASK_TYPE_NAMES.get(value, value)
@@ -449,8 +460,29 @@ async def users_list(
 ) -> HTMLResponse:
     try:
         with access_conn() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    user_id INTEGER PRIMARY KEY,
+                    full_name TEXT,
+                    role TEXT NOT NULL DEFAULT 'employee',
+                    department TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             user_rows = conn.execute(
-                "SELECT user_id, first_seen_at FROM allowed_users ORDER BY first_seen_at DESC"
+                """
+                SELECT
+                    au.user_id,
+                    au.first_seen_at,
+                    up.full_name,
+                    COALESCE(up.role, 'employee') AS role,
+                    up.department
+                FROM allowed_users au
+                LEFT JOIN user_profiles up ON up.user_id = au.user_id
+                ORDER BY au.first_seen_at DESC
+                """
             ).fetchall()
             chat_rows = conn.execute(
                 "SELECT chat_id, first_seen_at FROM allowed_chats ORDER BY first_seen_at DESC"
@@ -458,11 +490,26 @@ async def users_list(
     except Exception:
         user_rows, chat_rows = [], []
 
-    users = [{"user_id": r[0], "first_seen_at": r[1]} for r in user_rows]
+    users = [
+        {
+            "user_id": r[0],
+            "first_seen_at": r[1],
+            "full_name": r[2],
+            "role": r[3] or "employee",
+            "department": r[4],
+        }
+        for r in user_rows
+    ]
     chats = [{"chat_id": r[0], "first_seen_at": r[1]} for r in chat_rows]
     return templates.TemplateResponse(
         "users.html",
-        {"request": request, "users": users, "chats": chats, "success": success},
+        {
+            "request": request,
+            "users": users,
+            "chats": chats,
+            "success": success,
+            "role_choices": ROLE_CHOICES,
+        },
     )
 
 
@@ -472,7 +519,19 @@ async def remove_user(
     _user: str = Depends(check_auth),
 ) -> RedirectResponse:
     with access_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                role TEXT NOT NULL DEFAULT 'employee',
+                department TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.execute("DELETE FROM allowed_users WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM user_profiles WHERE user_id=?", (user_id,))
         conn.commit()
     return RedirectResponse(url="/users?success=removed", status_code=303)
 
@@ -480,11 +539,73 @@ async def remove_user(
 @app.post("/users/add")
 async def add_user(
     user_id: int = Form(...),
+    full_name: Optional[str] = Form(None),
+    role: str = Form("employee"),
+    department: Optional[str] = Form(None),
     _user: str = Depends(check_auth),
 ) -> RedirectResponse:
+    role = role.strip().lower() if role else "employee"
+    if role not in ROLE_CHOICES:
+        raise HTTPException(status_code=422, detail="Некорректная роль")
+
     with access_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                role TEXT NOT NULL DEFAULT 'employee',
+                department TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.execute(
             "INSERT OR IGNORE INTO allowed_users(user_id) VALUES(?)", (user_id,)
         )
+        conn.execute(
+            "INSERT INTO user_profiles(user_id, full_name, role, department) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "full_name=excluded.full_name, role=excluded.role, department=excluded.department, "
+            "updated_at=CURRENT_TIMESTAMP",
+            (user_id, (full_name or "").strip() or None, role, (department or "").strip() or None),
+        )
         conn.commit()
     return RedirectResponse(url="/users?success=added", status_code=303)
+
+
+@app.post("/users/save_profile")
+async def save_user_profile(
+    user_id: int = Form(...),
+    full_name: Optional[str] = Form(None),
+    role: str = Form("employee"),
+    department: Optional[str] = Form(None),
+    _user: str = Depends(check_auth),
+) -> RedirectResponse:
+    role = role.strip().lower() if role else "employee"
+    if role not in ROLE_CHOICES:
+        raise HTTPException(status_code=422, detail="Некорректная роль")
+
+    with access_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                role TEXT NOT NULL DEFAULT 'employee',
+                department TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute("INSERT OR IGNORE INTO allowed_users(user_id) VALUES(?)", (user_id,))
+        conn.execute(
+            "INSERT INTO user_profiles(user_id, full_name, role, department) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "full_name=excluded.full_name, role=excluded.role, department=excluded.department, "
+            "updated_at=CURRENT_TIMESTAMP",
+            (user_id, (full_name or "").strip() or None, role, (department or "").strip() or None),
+        )
+        conn.commit()
+
+    return RedirectResponse(url="/users?success=saved", status_code=303)
