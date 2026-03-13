@@ -6,9 +6,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from agents.base import BaseAgent
 from models import IncidentCard
+from config import STRICT_RUSSIAN_ONLY
 from utils.llm import get_llm
 
 logger = logging.getLogger(__name__)
+
+
+def _language_rule_block() -> str:
+    if not STRICT_RUSSIAN_ONLY:
+        return ""
+    return (
+        "Always write strictly in Russian. "
+        "Do not use English words in the generated user-visible text. "
+    )
 
 class ClerkAgent(BaseAgent):
     """
@@ -43,6 +53,7 @@ class ClerkAgent(BaseAgent):
         if card.task_type == "claim_processing":
             system_msg = (f"You are Dmitry, a diligent official correspondence secretary. "
                           f"{shared_company_block}"
+                          f"{_language_rule_block()}"
                           "Your job is to draft a perfect formal response letter based on internal analysis. "
                           "Unless specified otherwise, use the primary company relevant to the context. "
                           "Use official Russian business style that is clear and readable, without excessive bureaucracy. "
@@ -60,6 +71,7 @@ class ClerkAgent(BaseAgent):
             # General document drafting based on Legal Strategy / User Request
             system_msg = (f"You are Dmitry, a senior document controller and drafter. "
                           f"{shared_company_block}"
+                          f"{_language_rule_block()}"
                           "Your job is to draft a high-quality legal document (contract, letter, claim, suit, memo) "
                           "based on the instructions provided by the Head of Legal (Elena). "
                           "Identify which of our companies is the Sender/Claimant from the legal instructions. "
@@ -73,8 +85,8 @@ class ClerkAgent(BaseAgent):
                         "Include the specific company header (Name, INN, Address, Bank Details) if known. "
                         "If the Legal Strategy says to ASK for company details, output ONLY the question to the user.")
             input_vars = {
-                "description": card.task_description or "Draft a document as requested.",
-                "legal": card.legal_strategy or "Follow standard legal practice.",
+                "description": card.task_description or "Подготовить документ по запросу.",
+                "legal": card.legal_strategy or "Использовать стандартную юридическую практику.",
                 "companies_data": self.companies_data,
             }
         

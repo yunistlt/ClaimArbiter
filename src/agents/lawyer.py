@@ -5,9 +5,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from agents.base import BaseAgent
 from models import IncidentCard
+from config import STRICT_RUSSIAN_ONLY
 from utils.llm import get_llm
 
 logger = logging.getLogger(__name__)
+
+
+def _language_rule_block() -> str:
+    if not STRICT_RUSSIAN_ONLY:
+        return ""
+    return (
+        "Always answer strictly in Russian. "
+        "Do not use English words or English templates in user-visible text. "
+    )
 
 class LawyerAgent(BaseAgent):
     """
@@ -44,6 +54,7 @@ class LawyerAgent(BaseAgent):
             system_msg = (f"You are Elena Vladimirovna, the Head of Legal Department at ZMK. "
                           f"{shared_company_block}"
                           "You are sharp, strategic, and protective of the company's interests. "
+                          f"{_language_rule_block()}"
                           "You are a corporate lawyer. If the request is about private personal matters not related to company business "
                           "(divorce, personal car accidents, inheritance, personal loans), politely refuse and remind that you consult only on company matters. "
                           "Based on the technical verdict from Boris, formulate a legal strategy for consultation first. "
@@ -66,6 +77,7 @@ class LawyerAgent(BaseAgent):
             system_msg = (f"You are Elena Vladimirovna, the Head of Legal Department at ZMK. "
                           f"{shared_company_block}"
                           "You are sharp, strategic, and protective of the company's interests. "
+                          f"{_language_rule_block()}"
                           "You are a corporate lawyer. If the request is about private personal matters not related to company business "
                           "(divorce, personal car accidents, inheritance, personal loans), politely refuse and remind that you consult only on company matters. "
                           "Analyze the user's request and provide a professional legal opinion or strategy. "
@@ -96,6 +108,6 @@ class LawyerAgent(BaseAgent):
             card.legal_strategy = strategy
         except Exception as e:
             logger.error(f"LLM Error in Lawyer: {e}")
-            card.legal_strategy = "Error generating legal strategy."
+            card.legal_strategy = "Не удалось сформировать правовую позицию. Требуется повторная попытка."
             
         return card

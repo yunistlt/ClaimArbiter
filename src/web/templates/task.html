@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Задача #{{ task.id }} — ClaimArbiter Admin{% endblock %}
+{% block title %}Задача #{{ task.id }} — ЗМК-Юрист{% endblock %}
 {% block page_title %}Задача #{{ task.id }}{% endblock %}
 
 {% block content %}
@@ -36,10 +36,10 @@
           <dt class="col-5 text-muted fw-normal">Запросил</dt>
           <dd class="col-7">{{ task.requester_name }}</dd>
 
-          <dt class="col-5 text-muted fw-normal">User ID</dt>
+          <dt class="col-5 text-muted fw-normal">Идентификатор пользователя</dt>
           <dd class="col-7"><code>{{ task.requester_user_id }}</code></dd>
 
-          <dt class="col-5 text-muted fw-normal">Чат ID</dt>
+          <dt class="col-5 text-muted fw-normal">Идентификатор чата</dt>
           <dd class="col-7"><code>{{ task.chat_id }}</code></dd>
 
           <dt class="col-5 text-muted fw-normal">Статус</dt>

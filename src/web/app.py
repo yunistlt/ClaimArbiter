@@ -131,6 +131,17 @@ ROLE_CHOICES = [
     "employee",
 ]
 
+ROLE_LABELS_RU = {
+    "ceo": "Директор",
+    "head_of_legal": "Руководитель юридического отдела",
+    "lawyer": "Юрист",
+    "sales": "Продажи",
+    "procurement": "Снабжение",
+    "warehouse": "Склад",
+    "accountant": "Бухгалтерия",
+    "employee": "Сотрудник",
+}
+
 
 def human_task_type(value: str) -> str:
     return TASK_TYPE_NAMES.get(value, value)
@@ -509,6 +520,7 @@ async def users_list(
             "chats": chats,
             "success": success,
             "role_choices": ROLE_CHOICES,
+            "role_labels": ROLE_LABELS_RU,
         },
     )
 

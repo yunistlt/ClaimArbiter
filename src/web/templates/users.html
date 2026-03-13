@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Пользователи — ClaimArbiter Admin{% endblock %}
+{% block title %}Пользователи — ЗМК-Юрист{% endblock %}
 {% block page_title %}Управление доступом{% endblock %}
 
 {% block content %}
@@ -36,7 +36,7 @@
           <table class="table table-hover mb-0">
             <thead style="background:#f8f9fa">
               <tr>
-                <th style="padding-left:1.25rem">Telegram User ID</th>
+                <th style="padding-left:1.25rem">Идентификатор пользователя (Телеграм)</th>
                 <th>ФИО</th>
                 <th>Роль</th>
                 <th>Отдел</th>
@@ -57,7 +57,7 @@
                 <td>
                     <select class="form-select form-select-sm" name="role" form="profile-{{ u.user_id }}">
                       {% for role in role_choices %}
-                      <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role }}</option>
+                      <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role_labels[role] }}</option>
                       {% endfor %}
                     </select>
                 </td>
@@ -105,8 +105,8 @@
         <h6 class="fw-semibold mb-3">Добавить сотрудника</h6>
         <form method="post" action="/users/add">
           <div class="mb-2">
-            <input type="number" name="user_id" class="form-control form-control-sm"
-                   placeholder="Telegram User ID" required>
+                     <input type="number" name="user_id" class="form-control form-control-sm"
+                       placeholder="Идентификатор пользователя (Телеграм)" required>
           </div>
           <div class="mb-2">
             <input type="text" name="full_name" class="form-control form-control-sm"
@@ -115,7 +115,7 @@
           <div class="mb-2">
             <select class="form-select form-select-sm" name="role">
               {% for role in role_choices %}
-              <option value="{{ role }}" {% if role == 'employee' %}selected{% endif %}>{{ role }}</option>
+              <option value="{{ role }}" {% if role == 'employee' %}selected{% endif %}>{{ role_labels[role] }}</option>
               {% endfor %}
             </select>
           </div>
@@ -143,7 +143,7 @@
           <table class="table table-hover mb-0">
             <thead style="background:#f8f9fa">
               <tr>
-                <th style="padding-left:1.25rem">Chat ID</th>
+                <th style="padding-left:1.25rem">Идентификатор чата</th>
                 <th>Добавлен</th>
               </tr>
             </thead>

@@ -13,6 +13,7 @@ from services.review_queue import ReviewQueue
 from services.access_control import AccessControl
 from aiogram.types import FSInputFile
 from bot.filters import IsAllowedUser
+from config import STRICT_RUSSIAN_ONLY
 import asyncio
 import json
 import os
@@ -76,16 +77,42 @@ def role_response_style(role: str) -> str:
     return styles.get(role_key, styles["employee"])
 
 
+def role_name_ru(role: str) -> str:
+    mapping = {
+        "ceo": "директор",
+        "head_of_legal": "руководитель юридического отдела",
+        "lawyer": "юрист",
+        "sales": "сотрудник отдела продаж",
+        "procurement": "сотрудник отдела снабжения",
+        "warehouse": "сотрудник склада",
+        "accountant": "сотрудник бухгалтерии",
+        "employee": "сотрудник",
+    }
+    return mapping.get((role or "employee").strip().lower(), "сотрудник")
+
+
 def build_user_role_context(user_profile: dict) -> str:
     role = user_profile.get("role") or "employee"
     department = user_profile.get("department") or "не указан"
     full_name = user_profile.get("full_name") or "не указано"
     style = role_response_style(role)
+    role_ru = role_name_ru(role)
     return (
         f"Сотрудник: {full_name}. "
-        f"Роль: {role}. "
+        f"Роль: {role_ru}. "
         f"Отдел: {department}. "
         f"Требуемый формат ответа: {style}"
+    )
+
+
+def russian_only_rule_block() -> str:
+    if not STRICT_RUSSIAN_ONLY:
+        return ""
+    return (
+        "\n\nСТРОГОЕ ПРАВИЛО ЯЗЫКА:\n"
+        "- Любой ответ пользователю только на русском языке.\n"
+        "- Не используй английские слова, аббревиатуры и англоязычные шаблоны.\n"
+        "- Если термин обычно пишется на английском, дай русский эквивалент или краткое русское пояснение.\n"
     )
 
 
@@ -395,7 +422,9 @@ async def chat_with_llm(message: types.Message):
                    "5. Не используй шаблонные фразы вроде 'мы всегда готовы помочь' без фактического содержания.\n"
                    "6. По умолчанию отвечай коротко: 1-3 абзаца, без лишней формализации.\n"
                    "7. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"
-                   "8. Персонализируй стиль ответа под роль сотрудника из профиля.\n\n"
+                   "8. Персонализируй стиль ответа под роль сотрудника из профиля.\n"
+                   "{russian_only_rule}\n"
+                   "\n"
                    "Профиль текущего сотрудника:\n{role_context}\n"),
         ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
@@ -405,7 +434,14 @@ async def chat_with_llm(message: types.Message):
     try:
         # 3. Get LLM Decision
         # Use ainvoke with robust error handling
-        ai_msg = await chain.ainvoke({"text": message.text, "context": chat_context, "role_context": role_context})
+        ai_msg = await chain.ainvoke(
+            {
+                "text": message.text,
+                "context": chat_context,
+                "role_context": role_context,
+                "russian_only_rule": russian_only_rule_block(),
+            }
+        )
         
         # 4. Check for Tool Calls
         if ai_msg.tool_calls:
@@ -447,8 +483,7 @@ async def chat_with_llm(message: types.Message):
         
     except Exception as e:
         logger.error(f"Chat LLM Error: {e}", exc_info=True)
-        # Show specific error to user for debugging (temporary)
-        await message.answer(f"⚠️ Ошибка в модуле решений (LLM): {str(e)}")
+        await message.answer("⚠️ Внутренняя ошибка модуля консультации. Попробуйте повторить запрос через минуту.")
 
 async def run_delegated_task(message: types.Message, card: IncidentCard, generate_document: bool = False):
     """

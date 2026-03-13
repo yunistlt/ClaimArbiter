@@ -29,3 +29,8 @@ if not LAWYER_REVIEWER_IDS:
 AUTO_ALLOW_PRIVATE_USERS = os.getenv("AUTO_ALLOW_PRIVATE_USERS", "1").strip().lower() in [
     "1", "true", "yes", "on"
 ]
+
+# Строгое языковое правило: все пользовательские ответы и интерфейсы должны быть на русском языке.
+STRICT_RUSSIAN_ONLY = os.getenv("STRICT_RUSSIAN_ONLY", "1").strip().lower() in [
+	"1", "true", "yes", "on"
+]

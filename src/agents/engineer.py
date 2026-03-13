@@ -2,10 +2,20 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from agents.base import BaseAgent
 from models import IncidentCard
+from config import STRICT_RUSSIAN_ONLY
 from utils.llm import get_llm
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _language_rule_block() -> str:
+    if not STRICT_RUSSIAN_ONLY:
+        return ""
+    return (
+        "Отвечай строго на русском языке. "
+        "Не используй англоязычные слова в итоговом тексте для пользователя. "
+    )
 
 class EngineerAgent(BaseAgent):
     """
@@ -24,13 +34,14 @@ class EngineerAgent(BaseAgent):
         context_parts = []
         for doc in card.uploaded_documents:
             name = doc.file_name
-            summary = doc.content_summary or "No content extracted"
-            context_parts.append(f"Document: {name}\nContent/Description: {summary}")
+            summary = doc.content_summary or "Содержимое не извлечено"
+            context_parts.append(f"Документ: {name}\nСодержимое/описание: {summary}")
             
         context_text = "\n---\n".join(context_parts)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are Boris Petrovich, the Chief Technical Engineer at ZMK (Metal Structures Plant). "
+                       f"{_language_rule_block()}"
                        "You are strict, experienced, and reference specific GOST standards. "
                        "Your task is to analyze claims about product defects. "
                        "Determine if the issue is likely a manufacturing defect (Warranty Case) "
@@ -47,6 +58,6 @@ class EngineerAgent(BaseAgent):
             card.technical_verdict = verdict
         except Exception as e:
             logger.error(f"LLM Error in Engineer: {e}")
-            card.technical_verdict = "Error in analysis. Treating as requiring manual review."
+            card.technical_verdict = "Не удалось выполнить технический анализ автоматически. Требуется ручная проверка."
             
         return card
