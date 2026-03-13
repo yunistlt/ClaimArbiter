@@ -4,11 +4,15 @@ from bot.filters import IsAllowedUser
 from services.access_control import AccessControl
 from services.incident_manager import IncidentManager
 from services.review_queue import ReviewQueue
-from config import AUTO_ALLOW_PRIVATE_USERS
+from config import AUTO_ALLOW_PRIVATE_USERS, LAWYER_REVIEWER_IDS
 
 router = Router()
 access_control = AccessControl()
 review_queue = ReviewQueue()
+
+
+def can_manage_roles(user_id: int) -> bool:
+    return user_id in LAWYER_REVIEWER_IDS
 
 
 def unauthorized_private_text(user_id: int) -> str:
@@ -28,7 +32,7 @@ async def on_user_joined(message: types.Message):
         access_control = AccessControl()
         access_control.add_chat(message.chat.id)
         if message.from_user and not message.from_user.is_bot:
-             access_control.add_user(message.from_user.id)
+               access_control.add_user(message.from_user.id, full_name=message.from_user.full_name)
              
         # Если добавили самого бота
         bot_user = await message.bot.get_me()
@@ -42,7 +46,7 @@ async def on_user_joined(message: types.Message):
                         "⚠️ <b>Важно:</b> Сделайте меня <b>Администратором</b>, чтобы я видел сообщения всех сотрудников."
                     )
                 elif not member.is_bot:
-                    access_control.add_user(member.id)
+                    access_control.add_user(member.id, full_name=member.full_name)
 
 @router.message(CommandStart(), ~IsAllowedUser())
 async def command_start_unauthorized(message: types.Message) -> None:
@@ -50,7 +54,7 @@ async def command_start_unauthorized(message: types.Message) -> None:
     Handler for unauthorized users in PM.
     """
     if AUTO_ALLOW_PRIVATE_USERS and message.chat.type == "private" and message.from_user:
-        access_control.add_user(message.from_user.id)
+        access_control.add_user(message.from_user.id, full_name=message.from_user.full_name)
         await message.answer(
             f"✅ Доступ в личке активирован, {message.from_user.full_name}.\n"
             "Теперь можно писать запрос в свободной форме."
@@ -66,7 +70,7 @@ async def private_message_unauthorized(message: types.Message) -> None:
     Prevent silent drops for unauthorized users in private chats.
     """
     if AUTO_ALLOW_PRIVATE_USERS and message.from_user:
-        access_control.add_user(message.from_user.id)
+        access_control.add_user(message.from_user.id, full_name=message.from_user.full_name)
         await message.answer("✅ Доступ в личке активирован. Повторите, пожалуйста, ваш запрос.")
         return
 
@@ -96,9 +100,11 @@ async def command_help_handler(message: types.Message) -> None:
                          "/start - Начало работы\n"
                          "/status - Правовая оценка ситуации\n"
                          "/diag - Диагностика состояния памяти и хранилищ\n"
+                         "/whoami - Мой профиль и роль\n"
                          "/write - Генерация документа (в разработке)\n"
                          "/files - Список документов (в разработке)\n\n"
                          "Команды юриста (в личном чате):\n"
+                         "/setrole <user_id> <role> [department] - Назначить роль\n"
                          "/review_rules - Показать режимы согласования\n"
                          "/review_set <task_type> <auto|manual> - Изменить режим\n"
                          "/review_queue - Очередь на проверку\n"
@@ -122,6 +128,7 @@ async def command_diag_handler(message: types.Message) -> None:
         f"База доступа: <code>{access_diag['db_path']}</code>\n"
         f"База доступа существует: <b>{'да' if access_diag['db_exists'] else 'нет'}</b>\n"
         f"Известных пользователей: <b>{access_diag['known_users']}</b>\n"
+        f"Профилей сотрудников: <b>{access_diag['profiles_count']}</b>\n"
         f"Известных чатов: <b>{access_diag['known_chats']}</b>\n"
         f"Связок пользователь→чат: <b>{access_diag['active_context_links']}</b>\n"
         f"Legacy allowed_users.json остался: <b>{'да' if access_diag['legacy_file_exists'] else 'нет'}</b>\n\n"
@@ -131,3 +138,60 @@ async def command_diag_handler(message: types.Message) -> None:
         f"Задач в очереди: <b>{review_diag['pending_tasks']}</b>"
     )
     await message.answer(text)
+
+
+@router.message(Command("whoami"), IsAllowedUser())
+async def command_whoami_handler(message: types.Message) -> None:
+    profile = access_control.get_user_profile(message.from_user.id)
+    role = profile.get("role") or "employee"
+    department = profile.get("department") or "не указан"
+    full_name = profile.get("full_name") or message.from_user.full_name
+
+    await message.answer(
+        "👤 <b>Ваш профиль</b>\n\n"
+        f"ID: <code>{message.from_user.id}</code>\n"
+        f"ФИО: <b>{full_name}</b>\n"
+        f"Роль: <b>{role}</b>\n"
+        f"Отдел: <b>{department}</b>"
+    )
+
+
+@router.message(Command("setrole"), IsAllowedUser())
+async def command_setrole_handler(message: types.Message) -> None:
+    if not can_manage_roles(message.from_user.id):
+        await message.answer("⛔️ Недостаточно прав для назначения ролей.")
+        return
+
+    parts = (message.text or "").split(maxsplit=3)
+    if len(parts) < 3:
+        await message.answer("Формат: /setrole <user_id> <role> [department]")
+        return
+
+    user_id_raw = parts[1].strip()
+    role = parts[2].strip().lower()
+    department = parts[3].strip() if len(parts) > 3 else None
+
+    if not user_id_raw.isdigit():
+        await message.answer("user_id должен быть числом.")
+        return
+
+    user_id = int(user_id_raw)
+    full_name = None
+    existing = access_control.get_user_profile(user_id)
+    if existing:
+        full_name = existing.get("full_name")
+
+    access_control.set_user_profile(
+        user_id=user_id,
+        full_name=full_name,
+        role=role,
+        department=department,
+    )
+
+    updated = access_control.get_user_profile(user_id)
+    await message.answer(
+        "✅ <b>Профиль обновлен</b>\n\n"
+        f"ID: <code>{user_id}</code>\n"
+        f"Роль: <b>{updated.get('role') or role}</b>\n"
+        f"Отдел: <b>{updated.get('department') or (department or 'не указан')}</b>"
+    )

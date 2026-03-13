@@ -76,12 +76,26 @@ class SupabaseStorage:
             on_conflict="tg_chat_id",
         )
 
-    def upsert_work_user(self, user_id: int):
+    def upsert_work_user(
+        self,
+        user_id: int,
+        full_name: Optional[str] = None,
+        role: Optional[str] = None,
+        department: Optional[str] = None,
+    ):
+        payload = {
+            "tg_user_id": int(user_id),
+        }
+        if full_name is not None:
+            payload["full_name"] = full_name
+        if role is not None:
+            payload["role"] = role
+        if department is not None:
+            payload["department"] = department
+
         self._upsert(
             "work_users",
-            {
-                "tg_user_id": int(user_id),
-            },
+            payload,
             on_conflict="tg_user_id",
         )
 

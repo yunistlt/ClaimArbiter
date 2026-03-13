@@ -21,6 +21,7 @@ class AccessControl:
             cls._instance.users = set()
             cls._instance.chats = set()
             cls._instance.active_chat_by_user = {}
+            cls._instance.user_profiles = {}
             cls._instance._init_db()
             cls._instance.load_data()
         return cls._instance
@@ -55,6 +56,17 @@ class AccessControl:
                     CREATE TABLE IF NOT EXISTS active_user_chats (
                         user_id INTEGER PRIMARY KEY,
                         chat_id INTEGER NOT NULL,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_profiles (
+                        user_id INTEGER PRIMARY KEY,
+                        full_name TEXT,
+                        role TEXT NOT NULL DEFAULT 'employee',
+                        department TEXT,
                         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                     """
@@ -113,31 +125,152 @@ class AccessControl:
                 self.chats = {row[0] for row in cursor.fetchall()}
                 cursor.execute("SELECT user_id, chat_id FROM active_user_chats")
                 self.active_chat_by_user = {row[0]: row[1] for row in cursor.fetchall()}
+                cursor.execute("SELECT user_id, full_name, role, department FROM user_profiles")
+                self.user_profiles = {
+                    row[0]: {
+                        "user_id": row[0],
+                        "full_name": row[1],
+                        "role": row[2] or "employee",
+                        "department": row[3],
+                    }
+                    for row in cursor.fetchall()
+                }
             logger.info(f"Loaded {len(self.users)} allowed users and {len(self.chats)} chats.")
         except Exception as e:
             logger.error(f"Error loading access data: {e}")
             self.users = set()
             self.chats = set()
             self.active_chat_by_user = {}
+            self.user_profiles = {}
 
     def save_data(self):
         """No-op: DB writes happen incrementally in add_user/add_chat."""
         return
 
-    def add_user(self, user_id: int):
+    def add_user(self, user_id: int, full_name: str | None = None):
         """Add a user to allowlist and persist to DB."""
         if user_id in self.users:
+            if full_name:
+                self.set_user_profile(user_id=user_id, full_name=full_name)
             return
 
         try:
             with self._get_connection() as conn:
                 conn.execute("INSERT OR IGNORE INTO allowed_users (user_id) VALUES (?)", (int(user_id),))
+                conn.execute(
+                    "INSERT INTO user_profiles(user_id, full_name, role) VALUES(?, ?, 'employee') "
+                    "ON CONFLICT(user_id) DO UPDATE SET "
+                    "full_name = COALESCE(excluded.full_name, user_profiles.full_name), "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (int(user_id), full_name),
+                )
                 conn.commit()
             self.users.add(user_id)
-            self._supabase.upsert_work_user(user_id)
+            self.user_profiles[user_id] = {
+                "user_id": user_id,
+                "full_name": full_name,
+                "role": "employee",
+                "department": None,
+            }
+            self._supabase.upsert_work_user(user_id=user_id, full_name=full_name)
             logger.info(f"New user authorized: {user_id}")
         except Exception as e:
             logger.error(f"Error adding user {user_id}: {e}")
+
+    def set_user_profile(
+        self,
+        user_id: int,
+        full_name: str | None = None,
+        role: str | None = None,
+        department: str | None = None,
+    ):
+        normalized_role = (role or "").strip().lower() or None
+        if normalized_role is None and user_id in self.user_profiles:
+            normalized_role = self.user_profiles[user_id].get("role") or "employee"
+        if normalized_role is None:
+            normalized_role = "employee"
+
+        try:
+            with self._get_connection() as conn:
+                conn.execute("INSERT OR IGNORE INTO allowed_users (user_id) VALUES (?)", (int(user_id),))
+                conn.execute(
+                    "INSERT INTO user_profiles(user_id, full_name, role, department) VALUES(?, ?, ?, ?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET "
+                    "full_name = COALESCE(excluded.full_name, user_profiles.full_name), "
+                    "role = COALESCE(excluded.role, user_profiles.role), "
+                    "department = COALESCE(excluded.department, user_profiles.department), "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (int(user_id), full_name, normalized_role, department),
+                )
+                conn.commit()
+
+            self.users.add(user_id)
+            current = self.user_profiles.get(user_id, {"user_id": user_id})
+            current["full_name"] = full_name or current.get("full_name")
+            current["role"] = normalized_role or current.get("role") or "employee"
+            current["department"] = department or current.get("department")
+            self.user_profiles[user_id] = current
+
+            self._supabase.upsert_work_user(
+                user_id=user_id,
+                full_name=current.get("full_name"),
+                role=current.get("role"),
+                department=current.get("department"),
+            )
+        except Exception as e:
+            logger.error(f"Error setting profile for user {user_id}: {e}")
+
+    def get_user_profile(self, user_id: int) -> dict:
+        profile = self.user_profiles.get(user_id)
+        if profile:
+            return profile
+
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT user_id, full_name, role, department FROM user_profiles WHERE user_id = ?",
+                    (int(user_id),),
+                ).fetchone()
+            if row:
+                profile = {
+                    "user_id": row[0],
+                    "full_name": row[1],
+                    "role": row[2] or "employee",
+                    "department": row[3],
+                }
+                self.user_profiles[user_id] = profile
+                return profile
+        except Exception as e:
+            logger.error(f"Error getting profile for user {user_id}: {e}")
+
+        return {
+            "user_id": int(user_id),
+            "full_name": None,
+            "role": "employee",
+            "department": None,
+        }
+
+    def list_user_profiles(self) -> list[dict]:
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT user_id, full_name, role, department FROM user_profiles ORDER BY updated_at DESC"
+                ).fetchall()
+            result = [
+                {
+                    "user_id": row[0],
+                    "full_name": row[1],
+                    "role": row[2] or "employee",
+                    "department": row[3],
+                }
+                for row in rows
+            ]
+            for item in result:
+                self.user_profiles[item["user_id"]] = item
+            return result
+        except Exception as e:
+            logger.error(f"Error listing user profiles: {e}")
+            return []
 
     def add_chat(self, chat_id: int):
         """Add a chat to the known work chats list and persist to DB."""
@@ -173,7 +306,7 @@ class AccessControl:
                 )
                 conn.commit()
             self.active_chat_by_user[user_id] = chat_id
-            self._supabase.upsert_work_user(user_id)
+            self._supabase.upsert_work_user(user_id=user_id)
             self._supabase.upsert_work_chat(chat_id)
             self._supabase.upsert_active_user_chat(user_id, chat_id)
         except Exception as e:
@@ -190,4 +323,5 @@ class AccessControl:
             "known_users": len(self.users),
             "known_chats": len(self.chats),
             "active_context_links": len(self.active_chat_by_user),
+            "profiles_count": len(self.user_profiles),
         }

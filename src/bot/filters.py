@@ -24,7 +24,7 @@ class IsAllowedUser(BaseFilter):
             # Запоминаем этот чат как рабочий
             access_control.add_chat(message.chat.id)
             # Запоминаем пользователя (на всякий случай, чтобы быстрее отвечать в ЛС)
-            access_control.add_user(user_id)
+            access_control.add_user(user_id, full_name=message.from_user.full_name)
             access_control.set_active_chat(user_id, message.chat.id)
             return True
         
@@ -36,7 +36,7 @@ class IsAllowedUser(BaseFilter):
         if access_control.is_user_known(user_id):
             return True
         if AUTO_ALLOW_PRIVATE_USERS:
-            access_control.add_user(user_id)
+            access_control.add_user(user_id, full_name=message.from_user.full_name)
             logging.info(f"Auto-authorized private user {user_id}.")
             return True
 
@@ -53,7 +53,7 @@ class IsAllowedUser(BaseFilter):
                 # Статусы, которые считаются "своими": creator, administrator, member, restricted (но не left/kicked)
                 if member_status.status in ["creator", "administrator", "member", "restricted"]:
                     logging.info(f"User {user_id} found in chat {chat_id}. Authorizing.")
-                    access_control.add_user(user_id) # Запоминаем навсегда
+                    access_control.add_user(user_id, full_name=message.from_user.full_name) # Запоминаем навсегда
                     return True
             except Exception as e:
                 # Возможно, бота удалили из этого чата или другая ошибка

@@ -67,6 +67,34 @@ def is_reviewer(user_id: int) -> bool:
     return user_id in LAWYER_REVIEWER_IDS
 
 
+def role_response_style(role: str) -> str:
+    role_key = (role or "employee").strip().lower()
+    styles = {
+        "ceo": "Пиши максимально кратко: 3-5 предложений, ключевые риски, решение и срок.",
+        "head_of_legal": "Пиши профессионально и структурно: позиция, риск, правовая опора, действие.",
+        "lawyer": "Пиши юридически точно, с нормами права и акцентом на доказательственную базу.",
+        "sales": "Пиши как инструкцию: что отправить клиенту, какие документы запросить, что сделать сегодня.",
+        "procurement": "Пиши с акцентом на договорные условия, риски ответственности и порядок согласования.",
+        "warehouse": "Пиши практично и пошагово: что зафиксировать, какие акты и фото нужны, кто ответственный.",
+        "accountant": "Пиши с акцентом на финансовые риски, сроки, документы-основания и проводимые действия.",
+        "employee": "Пиши понятно и делово, с конкретным следующим шагом.",
+    }
+    return styles.get(role_key, styles["employee"])
+
+
+def build_user_role_context(user_profile: dict) -> str:
+    role = user_profile.get("role") or "employee"
+    department = user_profile.get("department") or "не указан"
+    full_name = user_profile.get("full_name") or "не указано"
+    style = role_response_style(role)
+    return (
+        f"Сотрудник: {full_name}. "
+        f"Роль: {role}. "
+        f"Отдел: {department}. "
+        f"Требуемый формат ответа: {style}"
+    )
+
+
 async def send_pdf_to_chat(message: types.Message, chat_id: int, text: str, caption_prefix: str):
     pdf_filename = f"ZMK_Doc_{chat_id}_{message.message_id}.pdf"
     temp_dir = tempfile.gettempdir()
@@ -329,6 +357,9 @@ async def chat_with_llm(message: types.Message):
     
     # 2. Get history
     context_chat_id = resolve_context_chat_id(message)
+    access_control = AccessControl()
+    user_profile = access_control.get_user_profile(message.from_user.id)
+    role_context = build_user_role_context(user_profile)
     card = IncidentManager.get_or_create_incident(context_chat_id)
     # Use a wider window so the agent can keep discussion context, while still limiting token size.
     chat_history = card.chat_history[-200:]
@@ -369,7 +400,9 @@ async def chat_with_llm(message: types.Message):
                    "   - `legal_advice`: если нужен развернутый юридический разбор, но без обязательного выпуска документа.\n"
                    "5. Не используй шаблонные фразы вроде 'мы всегда готовы помочь' без фактического содержания.\n"
                    "6. По умолчанию отвечай коротко: 1-3 абзаца, без лишней формализации.\n"
-                   "7. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"),
+                   "7. Если спрашивают про сроки/статус, отвечай конкретно: этап, следующий шаг, срок или условие срока.\n"
+                   "8. Персонализируй стиль ответа под роль сотрудника из профиля.\n\n"
+                   "Профиль текущего сотрудника:\n{role_context}\n"),
         ("user", "История чата:\n{context}\n\nПоследнее сообщение: {text}")
     ])
     
@@ -378,7 +411,7 @@ async def chat_with_llm(message: types.Message):
     try:
         # 3. Get LLM Decision
         # Use ainvoke with robust error handling
-        ai_msg = await chain.ainvoke({"text": message.text, "context": chat_context})
+        ai_msg = await chain.ainvoke({"text": message.text, "context": chat_context, "role_context": role_context})
         
         # 4. Check for Tool Calls
         if ai_msg.tool_calls:
