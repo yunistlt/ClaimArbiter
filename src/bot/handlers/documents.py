@@ -616,20 +616,19 @@ async def run_delegated_task(message: types.Message, card: IncidentCard, generat
 
     def has_pipeline_error(current_card: IncidentCard) -> bool:
         """
-        Detect known error markers across pipeline outputs.
+        Detect TECHNICAL pipeline failures only.
+        Checks only fields that use explicit error prefixes set by agents.
+        Does NOT check legal_strategy — it's content and may legitimately
+        contain words like "ошибка" or "не удалось" as part of legal analysis.
         """
-        fields = [
-            current_card.technical_verdict,
-            current_card.legal_strategy,
-            current_card.generated_response,
-        ]
-        markers = ["error", "ошибка", "не удалось"]
-        for value in fields:
-            if not value:
-                continue
-            lowered = value.lower()
-            if any(marker in lowered for marker in markers):
-                return True
+        tech = current_card.technical_verdict or ""
+        if tech.lower().startswith("не удалось выполнить технический анализ"):
+            return True
+
+        doc = current_card.generated_response or ""
+        if doc.lower().startswith("не удалось сгенерировать"):
+            return True
+
         return False
 
     pipeline_failed = has_pipeline_error(card)
@@ -642,14 +641,14 @@ async def run_delegated_task(message: types.Message, card: IncidentCard, generat
     IncidentManager.update_incident(context_chat_id, card)
 
     # Display text preview
-    if pipeline_failed:
-        result_text = (
-            f"⚠️ <b>Частичный результат:</b>\n\n"
-            f"<code>{card.generated_response}</code>\n\n"
-            f"Файл не формирую: в одном из этапов возникла ошибка."
-        )
-    elif not generate_document:
+    if not generate_document:
+        # Consultation / analysis mode: always show the legal strategy response.
         result_text = build_consultation_response(card)
+    elif pipeline_failed:
+        result_text = (
+            f"⚠️ <b>Не удалось сформировать документ:</b> в одном из этапов возникла техническая ошибка.\n\n"
+            f"Исходные данные анализа:\n<code>{(card.legal_strategy or '')[:800]}</code>"
+        )
     else:
         result_text = (
             f"✅ <b>Готово:</b>\n\n"
