@@ -55,11 +55,14 @@ class SecretaryAgent(BaseAgent):
         claim_markers = ["претенз", "рекламац", "брак", "дефект", "торг-2", "torg-2", "торг-12", "torg-12"]
 
         if any(marker in context for marker in contract_markers):
-            card.task_type = "document_drafting"
+            # Contract uploads should default to analysis mode.
+            card.task_type = "legal_advice"
+            card.regulated_intent = "contract_analysis"
             if not card.task_description:
-                card.task_description = text or f"Согласование договора: {doc_info.file_name}"
+                card.task_description = text or f"Анализ договора: {doc_info.file_name}"
         elif any(marker in context for marker in claim_markers):
             card.task_type = "claim_processing"
+            card.regulated_intent = None
             if not card.task_description:
                 card.task_description = text or f"Претензионная работа: {doc_info.file_name}"
 

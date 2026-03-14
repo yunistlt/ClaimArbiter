@@ -266,9 +266,78 @@ def is_explicit_document_request(text: str) -> bool:
         "официальное письмо",
         "досудебную претензи",
         "иск",
-        "договор",
     ]
     return any(marker in normalized for marker in doc_markers)
+
+
+def _looks_like_contract_context(text: str, card: IncidentCard) -> bool:
+    combined = (text or "").lower()
+    contract_markers = ["договор", "контракт", "поставка", "спецификац", "протокол разноглас"]
+    if any(marker in combined for marker in contract_markers):
+        return True
+
+    for doc in card.uploaded_documents or []:
+        name = (doc.file_name or "").lower()
+        if any(marker in name for marker in ["договор", "contract", "agreement", "спецификац"]):
+            return True
+
+    description = (card.task_description or "").lower()
+    return any(marker in description for marker in contract_markers)
+
+
+def detect_regulated_intent(text: str, card: IncidentCard) -> str:
+    """
+    Deterministic intent routing based on regulations matrix.
+    """
+    normalized = (text or "").strip().lower()
+
+    if is_explicit_document_request(normalized):
+        return "document_drafting"
+
+    contract_context = _looks_like_contract_context(normalized, card)
+
+    key_terms_markers = [
+        "основные параметры",
+        "ключевые условия",
+        "сумм",
+        "срок",
+        "штраф",
+        "пени",
+        "неустой",
+        "порядок оплаты",
+        "выжимк",
+    ]
+    if contract_context and any(marker in normalized for marker in key_terms_markers):
+        return "contract_key_terms"
+
+    analysis_markers = [
+        "анализ",
+        "проанализ",
+        "оцен",
+        "риски",
+        "выгоды",
+        "провер",
+        "что мне грозит",
+    ]
+    if contract_context and (
+        normalized in {"анализ", "анализируй", "сделай анализ"}
+        or any(marker in normalized for marker in analysis_markers)
+    ):
+        return "contract_analysis"
+
+    legal_markers = ["гк", "иск", "претенз", "суд", "правов", "закон"]
+    if any(marker in normalized for marker in legal_markers):
+        return "legal_advice"
+
+    return "consultation"
+
+
+def intent_to_task_type(intent: str) -> str:
+    if intent == "document_drafting":
+        return "document_drafting"
+    if intent in ["contract_analysis", "contract_key_terms", "legal_advice"]:
+        return "legal_advice"
+    return "consultation"
 
 
 def enrich_task_description(card: IncidentCard, latest_user_text: str) -> str:
@@ -291,6 +360,25 @@ def enrich_task_description(card: IncidentCard, latest_user_text: str) -> str:
         return base
 
     return f"{base}\nУточнение пользователя: {latest}"
+
+
+def enrich_task_description_with_intent(card: IncidentCard, latest_user_text: str, intent: str) -> str:
+    base = enrich_task_description(card, latest_user_text)
+    if not base:
+        base = latest_user_text or ""
+
+    intent_hints = {
+        "contract_analysis": "[РЕЖИМ: CONTRACT_ANALYSIS] Требуется анализ договора: реквизиты, роль стороны, соответствие ГК РФ, выгоды, риски, рекомендации.",
+        "contract_key_terms": "[РЕЖИМ: CONTRACT_KEY_TERMS] Требуется выжимка параметров договора: сумма, сроки, штрафы/пени, порядок оплаты, приемка, расторжение.",
+        "document_drafting": "[РЕЖИМ: DOCUMENT_DRAFTING] Требуется подготовка официального документа по запросу пользователя.",
+        "legal_advice": "[РЕЖИМ: LEGAL_ADVICE] Требуется юридическое заключение и план действий без выпуска документа.",
+        "consultation": "[РЕЖИМ: CONSULTATION] Требуется консультационный ответ и уточнение недостающих данных.",
+    }
+
+    hint = intent_hints.get(intent)
+    if hint and hint not in base:
+        return f"{hint}\n{base}".strip()
+    return base
 
 
 def _extract_tag_block(text: str, tag: str) -> str:
@@ -451,19 +539,16 @@ async def chat_with_llm(message: types.Message):
                 args = tool_call["args"]
                 t_type = args.get("task_type", "consultation")
                 desc = args.get("description", "No description")
-                wants_document = is_explicit_document_request((message.text or "") + "\n" + desc)
-
-                # Safety: do not jump into drafting unless user explicitly asked for a document.
-                if t_type == "document_drafting" and not wants_document:
-                    t_type = "consultation"
-                elif wants_document and t_type in ["consultation", "legal_advice"]:
-                    t_type = "document_drafting"
+                intent = detect_regulated_intent((message.text or "") + "\n" + desc, card)
+                wants_document = intent == "document_drafting"
+                t_type = intent_to_task_type(intent)
                 
                 await message.answer(f"🔄 Вас понял. Поручаю задачу отделу: {human_task_type(t_type)}...")
                 
                 # Update card context
+                card.regulated_intent = intent
                 card.task_type = t_type
-                card.task_description = desc
+                card.task_description = enrich_task_description_with_intent(card, desc, intent)
                 IncidentManager.update_incident(context_chat_id, card)
                 
                 await run_delegated_task(message, card, generate_document=wants_document)
@@ -518,8 +603,8 @@ async def run_delegated_task(message: types.Message, card: IncidentCard, generat
         # Ideally, LawyerAgent should see the `task_description`.
         card = await lawyer.run(card)
         
-        # 2. Drafting only when explicitly requested or task requires a formal document.
-        should_draft = card.task_type == "document_drafting" or generate_document
+        # 2. Drafting only when explicitly requested by user.
+        should_draft = generate_document
         if should_draft:
             await status_msg.edit_text("📝 <b>Дмитрий (Документовед)</b> составляет документ...")
             card = await clerk.run(card)
@@ -727,12 +812,13 @@ async def handle_text_message(message: types.Message):
     if should_reply and is_force_run_command(message.text or ""):
         has_context = bool(card.uploaded_documents or card.task_description)
         if has_context:
-            card.task_description = enrich_task_description(card, message.text)
-            if card.task_type in ["claim", "claim_processing"] and "договор" in card.task_description.lower():
-                card.task_type = "document_drafting"
+            intent = detect_regulated_intent(message.text or "", card)
+            card.regulated_intent = intent
+            card.task_type = intent_to_task_type(intent)
+            card.task_description = enrich_task_description_with_intent(card, message.text, intent)
 
             IncidentManager.update_incident(context_chat_id, card)
-            wants_document = is_explicit_document_request(message.text or "")
+            wants_document = intent == "document_drafting"
             run_mode = "подготовку документа" if wants_document else "консультационный разбор"
             await message.answer(f"🔄 Принято. Запускаю {run_mode} с учетом ваших уточнений...")
             await run_delegated_task(message, card, generate_document=wants_document)

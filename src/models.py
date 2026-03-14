@@ -36,6 +36,7 @@ class IncidentCard(BaseModel):
     
     # Analysis
     task_type: str = "consultation"  # 'claim_processing', 'document_drafting', 'consultation', 'legal_advice'
+    regulated_intent: Optional[str] = None  # 'contract_analysis', 'contract_key_terms', 'document_drafting', 'legal_advice', 'consultation'
     task_description: Optional[str] = None # Description of the task for general legal work
     technical_verdict: Optional[str] = None
     legal_strategy: Optional[str] = None
